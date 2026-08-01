@@ -131,6 +131,11 @@ STORAGES = {
     },
 }
 
+# Safety net: don't 500 the whole page if a static file is missing from the
+# collectstatic manifest (e.g. build command didn't run collectstatic yet) —
+# just serve the file without a hashed/cached name instead of crashing.
+WHITENOISE_MANIFEST_STRICT = False
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # --------------------------------------------------------------------
