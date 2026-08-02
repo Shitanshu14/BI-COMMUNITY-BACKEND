@@ -25,6 +25,8 @@ class CommunitySerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
     def get_is_member(self, obj):
+        if hasattr(obj, 'is_member_val'):
+            return obj.is_member_val
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False

@@ -1,4 +1,4 @@
-from django.db.models import Count, Q
+from django.db.models import Count, Exists, OuterRef, Q
 from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -42,6 +42,19 @@ class CommunityViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdminOrReadOnly]
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user.is_authenticated:
+            # Same fix as is_liked on posts: one Exists() annotation instead
+            # of a per-row Membership.objects.filter(...).exists() query.
+            qs = qs.annotate(
+                is_member_val=Exists(
+                    Membership.objects.filter(user=user, community=OuterRef('pk'))
+                )
+            )
+        return qs
 
     def perform_create(self, serializer):
         community = serializer.save(created_by=self.request.user)

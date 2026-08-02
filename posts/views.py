@@ -1,8 +1,10 @@
 from django.db.models import Count, Exists, OuterRef
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
+from communities.models import Membership
 from notifications.models import Notification
 from notifications.tasks import create_notification
 from .models import Post, Comment, PollOption, PollVote
@@ -58,6 +60,9 @@ class PostViewSet(viewsets.ModelViewSet):
         return qs.order_by('-created_at')
 
     def perform_create(self, serializer):
+        community = serializer.validated_data.get('community')
+        if community and not Membership.objects.filter(user=self.request.user, community=community).exists():
+            raise PermissionDenied('Join this community before posting in it.')
         serializer.save(author=self.request.user)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
