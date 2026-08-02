@@ -28,6 +28,16 @@ class User(AbstractUser):
     is_verified = models.BooleanField(default=False)
     reputation_points = models.PositiveIntegerField(default=0)
 
+    # Separate from `is_verified` (which is the admin-approved Student/
+    # Professional/Educator badge). This just tracks whether the person
+    # clicked the confirmation link sent to their email at signup.
+    email_confirmed = models.BooleanField(default=False)
+
+    # Instagram-style: public profile = anyone who taps Follow follows
+    # instantly; private profile = the follow sits as a pending request
+    # until the person approves it (see follows app).
+    is_private = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

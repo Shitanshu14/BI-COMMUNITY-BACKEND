@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.utils import timezone
 
+from notifications.models import Notification
+from notifications.tasks import create_notification
 from .models import VerificationRequest
 
 
@@ -21,7 +23,23 @@ class VerificationRequestAdmin(admin.ModelAdmin):
             vr.save()
             vr.user.is_verified = True
             vr.user.save(update_fields=['is_verified'])
+            create_notification.delay(
+                recipient_id=str(vr.user_id),
+                verb=Notification.Verb.VERIFICATION_APPROVED,
+                actor_id=str(request.user.id),
+                target_id=str(vr.id),
+            )
 
     @admin.action(description='Reject selected requests')
     def reject_requests(self, request, queryset):
-        queryset.update(status=VerificationRequest.Status.REJECTED, reviewed_by=request.user, reviewed_at=timezone.now())
+        for vr in queryset:
+            vr.status = VerificationRequest.Status.REJECTED
+            vr.reviewed_by = request.user
+            vr.reviewed_at = timezone.now()
+            vr.save()
+            create_notification.delay(
+                recipient_id=str(vr.user_id),
+                verb=Notification.Verb.VERIFICATION_REJECTED,
+                actor_id=str(request.user.id),
+                target_id=str(vr.id),
+            )
