@@ -14,19 +14,33 @@ class CommentSerializer(serializers.ModelSerializer):
 
 
 class PollOptionSerializer(serializers.ModelSerializer):
-    vote_count = serializers.ReadOnlyField()
+    vote_count = serializers.SerializerMethodField()
 
     class Meta:
         model = PollOption
         fields = ['id', 'text', 'order', 'vote_count']
         read_only_fields = ['id', 'vote_count']
 
+    def get_vote_count(self, obj):
+        # When the post queryset prefetches 'poll_options__votes', obj.votes
+        # is already cached in memory — len() on it reuses that cache
+        # instead of firing a fresh COUNT query per option.
+        if hasattr(obj, '_prefetched_objects_cache') and 'votes' in obj._prefetched_objects_cache:
+            return len(obj.votes.all())
+        return obj.vote_count
+
 
 class PostSerializer(serializers.ModelSerializer):
     author = UserSerializer(read_only=True)
-    like_count = serializers.ReadOnlyField()
-    comment_count = serializers.ReadOnlyField()
+    like_count = serializers.SerializerMethodField()
+    comment_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
+
+    def get_like_count(self, obj):
+        return obj.like_count_val if hasattr(obj, 'like_count_val') else obj.like_count
+
+    def get_comment_count(self, obj):
+        return obj.comment_count_val if hasattr(obj, 'comment_count_val') else obj.comment_count
 
     # Poll support: write with a plain list of option strings
     # (`poll_options: ["Option A", "Option B"]`), read back as full
@@ -48,6 +62,8 @@ class PostSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'author', 'created_at', 'updated_at']
 
     def get_is_liked(self, obj):
+        if hasattr(obj, 'is_liked_val'):
+            return obj.is_liked_val
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False

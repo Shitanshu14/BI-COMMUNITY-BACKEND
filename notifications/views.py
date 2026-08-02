@@ -12,7 +12,9 @@ class NotificationListView(generics.ListAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Notification.objects.filter(recipient=self.request.user)
+        # select_related('actor') avoids one extra query per notification
+        # row for the nested UserSerializer(actor) field in the response.
+        return Notification.objects.filter(recipient=self.request.user).select_related('actor')
 
 
 @api_view(['GET'])

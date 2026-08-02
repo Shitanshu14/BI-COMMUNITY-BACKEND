@@ -4,8 +4,17 @@ from .models import Community, Membership
 
 
 class CommunitySerializer(serializers.ModelSerializer):
-    member_count = serializers.ReadOnlyField()
+    member_count = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
+
+    def get_member_count(self, obj):
+        # Present when the queryset was annotated (list/retrieve via the
+        # viewset) — avoids an extra query per row. Falls back to the
+        # property for cases where a plain model instance is serialized
+        # directly (e.g. join/leave action responses).
+        if hasattr(obj, 'member_count_val'):
+            return obj.member_count_val
+        return obj.member_count
 
     class Meta:
         model = Community

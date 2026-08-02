@@ -1,3 +1,4 @@
+from django.db.models import Count, Exists, OuterRef
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -22,7 +23,10 @@ class PostViewSet(viewsets.ModelViewSet):
     /api/posts/<id>/like/        -> POST toggle like
     /api/posts/<id>/comments/    -> GET list / POST create comment
     """
-    queryset = Post.objects.select_related('author', 'community').all()
+    # Base queryset stays select_related-only here; the heavier annotations
+    # (Count, Exists) are applied per-request in get_queryset() below, since
+    # is_liked_val depends on the requesting user.
+    queryset = Post.objects.select_related('author', 'community').prefetch_related('poll_options__votes')
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly, IsAuthorOrReadOnly]
 
@@ -34,6 +38,23 @@ class PostViewSet(viewsets.ModelViewSet):
         author_id = self.request.query_params.get('author')
         if author_id:
             qs = qs.filter(author_id=author_id)
+
+        # Previously like_count/comment_count/is_liked were each a property
+        # or a per-object .filter().exists() call — for a 20-post feed page
+        # that's up to 60 extra queries. Annotating once here brings a feed
+        # page back down to a small, fixed number of queries regardless of
+        # page size.
+        qs = qs.annotate(
+            like_count_val=Count('likes', distinct=True),
+            comment_count_val=Count('comments', distinct=True),
+        )
+        user = self.request.user
+        if user.is_authenticated:
+            qs = qs.annotate(
+                is_liked_val=Exists(
+                    Post.likes.through.objects.filter(post_id=OuterRef('pk'), user_id=user.id)
+                )
+            )
         return qs.order_by('-created_at')
 
     def perform_create(self, serializer):

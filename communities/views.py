@@ -1,4 +1,4 @@
-from django.db.models import Q
+from django.db.models import Count, Q
 from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -33,14 +33,23 @@ class CommunityViewSet(viewsets.ModelViewSet):
     Create/update/delete is admin-only (is_staff) — communities are made
     from the Django Admin panel, not by regular users through the app.
     """
-    queryset = Community.objects.all()
+    # `member_count` used to be a plain @property (self.members.count()),
+    # which meant DRF fired one extra COUNT query PER community on every
+    # list request (classic N+1 — 100 communities = 101 queries). Annotating
+    # it here does the whole thing in a single query regardless of list size.
+    queryset = Community.objects.annotate(member_count_val=Count('members', distinct=True))
     serializer_class = CommunitySerializer
     permission_classes = [IsAdminOrReadOnly]
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'description']
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        community = serializer.save(created_by=self.request.user)
+        # Auto-join the creator as an admin member — without this a brand
+        # new community always shows "0 members" even to its own creator.
+        Membership.objects.get_or_create(
+            user=self.request.user, community=community, defaults={'role': Membership.Role.ADMIN}
+        )
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def join(self, request, pk=None):
