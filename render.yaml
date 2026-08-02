@@ -9,3 +9,17 @@ services:
         value: "False"
       - key: PYTHON_VERSION
         value: "3.12.7"
+      # REQUIRED in production: with DEBUG=False, CORS_ALLOW_ALL_ORIGINS
+      # also defaults to false, so without this the backend rejects every
+      # request from the frontend (different domain: Netlify vs Render).
+      # Update this if your Netlify URL is different / you add a custom domain.
+      - key: CORS_ALLOWED_ORIGINS
+        value: "https://bharatintelligent.netlify.app"
+      # REQUIRED in production for the same cross-domain reason — see the
+      # comment in settings.py / .env.example. The code now defaults these
+      # correctly on its own when DEBUG=False, but setting them explicitly
+      # here makes the requirement visible instead of implicit.
+      - key: AUTH_COOKIE_SAMESITE
+        value: "None"
+      - key: AUTH_COOKIE_SECURE
+        value: "True"

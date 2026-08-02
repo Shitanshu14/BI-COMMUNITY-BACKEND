@@ -5,7 +5,7 @@ from django.db import models
 
 class User(AbstractUser):
     """
-    Custom user model for SETU.
+    Custom user model for BI Community.
     Extends Django's built-in auth so email login + verification fields work
     out of the box (matches the 'Verified Student/Professional' badge in the UI).
     """

@@ -13,7 +13,7 @@ class UserAdmin(BaseUserAdmin):
     actions = ['verify_users']
 
     fieldsets = BaseUserAdmin.fieldsets + (
-        ('SETU profile', {'fields': ('role', 'headline', 'bio', 'avatar', 'is_verified', 'reputation_points')}),
+        ('BI Community profile', {'fields': ('role', 'headline', 'bio', 'avatar', 'is_verified', 'reputation_points')}),
     )
 
     @admin.action(description='Mark selected users as Verified')

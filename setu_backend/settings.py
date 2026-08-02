@@ -1,5 +1,5 @@
 """
-Django settings for SETU (Bharat Intelligent) backend.
+Django settings for BI Community backend.
 """
 
 import sys
@@ -58,7 +58,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'channels',
 
-    # SETU apps
+    # BI Community apps
     'users',
     'communities',
     'posts',
@@ -210,9 +210,22 @@ SIMPLE_JWT = {
 
 AUTH_COOKIE_ACCESS = 'access_token'
 AUTH_COOKIE_REFRESH = 'refresh_token'
-AUTH_COOKIE_SAMESITE = config('AUTH_COOKIE_SAMESITE', default='Lax')
+# IMPORTANT — if your frontend and backend are on different domains (e.g.
+# frontend on Netlify, backend on Render — very common setup), the cookie
+# MUST be SameSite=None (with Secure=True, which requires https). With the
+# default SameSite=Lax, the browser silently drops the cookie on
+# cross-site fetches: login looks like it succeeds (200 response) but the
+# cookie never gets sent back on the next request, so the user appears
+# logged out immediately / WebSocket auth fails.
+# Same-domain setups (or local dev over http) can keep Lax.
+AUTH_COOKIE_SAMESITE = config('AUTH_COOKIE_SAMESITE', default='Lax' if DEBUG else 'None')
 AUTH_COOKIE_SECURE = config('AUTH_COOKIE_SECURE', default=not DEBUG, cast=bool)
 AUTH_COOKIE_DOMAIN = config('AUTH_COOKIE_DOMAIN', default=None)
+
+if AUTH_COOKIE_SAMESITE == 'None' and not AUTH_COOKIE_SECURE:
+    # SameSite=None cookies are rejected by browsers unless Secure is also
+    # set — fail loudly at boot instead of silently breaking every login.
+    raise ValueError('AUTH_COOKIE_SAMESITE=None requires AUTH_COOKIE_SECURE=True (needs https).')
 
 # --------------------------------------------------------------------
 # CORS (Flutter app / web dashboard call the API from device / browser)
@@ -237,7 +250,7 @@ EMAIL_PORT = config('EMAIL_PORT', default=587, cast=int)
 EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=True, cast=bool)
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='SETU <no-reply@bicommunity.app>')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='BI Community <no-reply@bicommunity.app>')
 
 # --------------------------------------------------------------------
 # CHANNELS (Chat / real-time notifications) — Redis-backed

@@ -37,8 +37,8 @@ def send_verification_email(user_id):
     link = f'{settings.FRONTEND_URL}/verify-email?uid={uid}&token={token}'
 
     send_mail(
-        subject='Confirm your SETU account',
-        message=f'Hi {user.username},\n\nConfirm your email to activate your SETU account:\n{link}\n\nIf you did not sign up, ignore this email.',
+        subject='Confirm your BI Community account',
+        message=f'Hi {user.username},\n\nConfirm your email to activate your BI Community account:\n{link}\n\nIf you did not sign up, ignore this email.',
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],
         fail_silently=False,
@@ -60,7 +60,7 @@ def send_password_reset_email(user_id):
     link = f'{settings.FRONTEND_URL}/reset-password?uid={uid}&token={token}'
 
     send_mail(
-        subject='Reset your SETU password',
+        subject='Reset your BI Community password',
         message=f'Hi {user.username},\n\nReset your password here:\n{link}\n\nIf you did not request this, ignore this email — your password will not change.',
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[user.email],

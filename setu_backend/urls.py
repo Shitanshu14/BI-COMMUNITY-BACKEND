@@ -5,6 +5,10 @@ from django.conf.urls.static import static
 
 from .health import health_check
 
+admin.site.site_header = 'BI Community Admin'
+admin.site.site_title = 'BI Community Admin'
+admin.site.index_title = 'BI Community — Administration'
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('healthz/', health_check, name='health-check'),

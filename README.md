@@ -1,6 +1,6 @@
-# SETU Backend — Phase 0 (Bharat Intelligent)
+# BI Community Backend — Phase 0
 
-Django + DRF + Channels backend for the SETU MVP (Feed | Chat | Members |
+Django + DRF + Channels backend for the BI Community MVP (Feed | Chat | Members |
 Activities | Resources). Covers the 5 MVP features from the master brief:
 
 1. Signup/Login + Profile — `users` app
