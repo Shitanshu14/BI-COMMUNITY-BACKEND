@@ -28,6 +28,13 @@ class User(AbstractUser):
     is_verified = models.BooleanField(default=False)
     reputation_points = models.PositiveIntegerField(default=0)
 
+    # Grants access to the (separate, limited) support dashboard — NOT the
+    # same as is_staff, which grants full Django Admin access. A support
+    # team member logs in through the normal app login; this flag just
+    # unlocks the extra "/support" screens in the frontend and the
+    # /api/support/ endpoints on the backend.
+    is_support = models.BooleanField(default=False)
+
     # Separate from `is_verified` (which is the admin-approved Student/
     # Professional/Educator badge). This just tracks whether the person
     # clicked the confirmation link sent to their email at signup.
