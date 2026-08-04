@@ -34,6 +34,8 @@ def blocked_user_ids(user):
 class PostViewSet(viewsets.ModelViewSet):
     """
     /api/posts/?community=<id>   -> feed for a community
+    /api/posts/?community=<id>&type=question   -> feed filtered to one post_type
+                                                    (question | post | poll)
     /api/posts/?author=<id>      -> a specific user's posts (profile page grid)
     /api/posts/<id>/like/        -> POST toggle like
     /api/posts/<id>/comments/    -> GET list / POST create comment (nested replies via `parent`)
@@ -60,6 +62,9 @@ class PostViewSet(viewsets.ModelViewSet):
         author_id = self.request.query_params.get('author')
         if author_id:
             qs = qs.filter(author_id=author_id)
+        post_type = self.request.query_params.get('type')
+        if post_type in dict(Post.PostType.choices):
+            qs = qs.filter(post_type=post_type)
 
         # Previously like_count/comment_count/is_liked were each a property
         # or a per-object .filter().exists() call — for a 20-post feed page

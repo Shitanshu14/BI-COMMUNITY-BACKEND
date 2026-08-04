@@ -7,18 +7,23 @@ from communities.models import Community
 
 class Post(models.Model):
     """
-    A single feed item. MVP ships only QUESTION and KNOWLEDGE types
-    (see strategy doc: 'start with Question/Knowledge post types only').
-    PROJECT / RESOURCE / POLL exist in the model now so the schema doesn't
-    need to change later, but the API/UI can restrict which ones are exposed.
+    A single feed item. Phase 2 collapses the content-type picker down to
+    three top-level types — QUESTION / POST / POLL — matching the "All /
+    Questions / Posts / Polls" feed tabs. What used to be separate
+    KNOWLEDGE / PROJECT / RESOURCE post types are now just `tags` on a
+    POST-type post (e.g. tags=["Knowledge", "Python", "OpenAI"]), so the
+    composer stays 3 buttons wide instead of a 5+ option dropdown.
     """
 
     class PostType(models.TextChoices):
         QUESTION = 'question', 'Question'
-        KNOWLEDGE = 'knowledge', 'Knowledge'
-        PROJECT = 'project', 'Project'          # Phase 2
-        RESOURCE = 'resource', 'Resource'        # Phase 2
-        POLL = 'poll', 'Poll'                    # Phase 2
+        POST = 'post', 'Post'
+        POLL = 'poll', 'Poll'
+
+    # Suggested tags shown as quick-pick chips in the composer when creating
+    # a POST-type post. Freeform tags are still allowed (see `tags` below) —
+    # this is just what the UI offers by default.
+    SUGGESTED_TAGS = ['Knowledge', 'Project', 'Resource']
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name='posts')
@@ -28,6 +33,12 @@ class Post(models.Model):
     title = models.CharField(max_length=200)
     body = models.TextField()
     image = models.ImageField(upload_to='post_images/', blank=True, null=True)
+
+    # Freeform labels for POST-type posts (Knowledge/Project/Resource/tech
+    # stack, etc). Stored as a plain JSON list of short strings rather than
+    # a separate Tag model — there's no tag browsing/filtering-by-tag
+    # requirement yet, so a normalized table would be premature.
+    tags = models.JSONField(default=list, blank=True)
 
     likes = models.ManyToManyField(
         settings.AUTH_USER_MODEL, related_name='liked_posts', blank=True

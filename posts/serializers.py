@@ -71,10 +71,16 @@ class PostSerializer(serializers.ModelSerializer):
     )
     voted_option_id = serializers.SerializerMethodField()
 
+    # Freeform chips on POST-type posts (Knowledge/Project/Resource/etc).
+    # Not required for question/poll posts — defaults to an empty list.
+    tags = serializers.ListField(
+        child=serializers.CharField(max_length=40), required=False, default=list
+    )
+
     class Meta:
         model = Post
         fields = [
-            'id', 'community', 'author', 'post_type', 'title', 'body', 'image',
+            'id', 'community', 'author', 'post_type', 'title', 'body', 'image', 'tags',
             'like_count', 'comment_count', 'is_liked', 'is_pinned',
             'poll_options', 'options', 'voted_option_id',
             'created_at', 'updated_at',

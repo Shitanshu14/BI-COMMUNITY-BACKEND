@@ -10,7 +10,7 @@ class PollOptionInline(admin.TabularInline):
 
 @admin.register(Post)
 class PostAdmin(admin.ModelAdmin):
-    list_display = ('title', 'post_type', 'community', 'author', 'is_pinned', 'like_count', 'comment_count', 'created_at')
+    list_display = ('title', 'post_type', 'tags', 'community', 'author', 'is_pinned', 'like_count', 'comment_count', 'created_at')
     list_filter = ('post_type', 'community', 'is_pinned')
     search_fields = ('title', 'body')
     inlines = [PollOptionInline]
