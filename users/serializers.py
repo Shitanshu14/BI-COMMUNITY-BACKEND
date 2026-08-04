@@ -31,11 +31,14 @@ class UserProfileSerializer(UserSerializer):
     follow_status = serializers.SerializerMethodField()  # 'following' | 'requested' | None
     is_followed_by = serializers.SerializerMethodField()
     communities = serializers.SerializerMethodField()
+    is_blocked = serializers.SerializerMethodField()       # have *I* blocked them
+    has_blocked_me = serializers.SerializerMethodField()   # have *they* blocked me
 
     class Meta(UserSerializer.Meta):
         fields = UserSerializer.Meta.fields + [
             'post_count', 'follower_count', 'following_count',
             'is_following', 'follow_status', 'is_followed_by', 'communities',
+            'is_blocked', 'has_blocked_me',
         ]
 
     def get_post_count(self, obj):
@@ -80,6 +83,20 @@ class UserProfileSerializer(UserSerializer):
     def get_communities(self, obj):
         from communities.serializers import CommunitySerializer
         return CommunitySerializer(obj.communities.all(), many=True, context=self.context).data
+
+    def get_is_blocked(self, obj):
+        me = self._request_user()
+        if not me or me == obj:
+            return False
+        from .models import Block
+        return Block.objects.filter(blocker=me, blocked=obj).exists()
+
+    def get_has_blocked_me(self, obj):
+        me = self._request_user()
+        if not me or me == obj:
+            return False
+        from .models import Block
+        return Block.objects.filter(blocker=obj, blocked=me).exists()
 
 
 class RegisterSerializer(serializers.ModelSerializer):

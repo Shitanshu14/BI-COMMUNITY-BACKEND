@@ -28,6 +28,11 @@ class FollowUserView(APIView):
         if target.id == request.user.id:
             return Response({'detail': "You can't follow yourself."}, status=status.HTTP_400_BAD_REQUEST)
 
+        from users.models import Block
+        if Block.objects.filter(blocker=request.user, blocked=target).exists() or \
+                Block.objects.filter(blocker=target, blocked=request.user).exists():
+            return Response({'detail': "You can't follow this user."}, status=status.HTTP_400_BAD_REQUEST)
+
         follow, created = Follow.objects.get_or_create(
             follower=request.user,
             following=target,
@@ -59,9 +64,10 @@ class UnfollowUserView(APIView):
 
 
 class FollowersListView(generics.ListAPIView):
-    """GET /api/users/<id>/followers/ — accepted followers only."""
+    """GET /api/users/<id>/followers/ — accepted followers only. Requires
+    login, same as the rest of the app (no anonymous browsing)."""
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return User.objects.filter(
@@ -73,7 +79,7 @@ class FollowersListView(generics.ListAPIView):
 class FollowingListView(generics.ListAPIView):
     """GET /api/users/<id>/following/ — accepted follows only."""
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return User.objects.filter(

@@ -12,15 +12,18 @@ from .serializers import CommunitySerializer
 class IsAdminOrReadOnly(permissions.BasePermission):
     """
     Communities are created only by admins (Django Admin login / staff users).
-    Everyone (including anonymous, read-only) can list/view communities.
-    Regular logged-in users can never create/edit/delete a community — they
-    can only join/leave and post inside one.
+    Any *logged-in* user can list/view communities (read requires login —
+    there's no anonymous browsing of the platform, see the login-gate
+    requirement). Regular logged-in users can never create/edit/delete a
+    community — they can only join/leave and post inside one.
     """
 
     def has_permission(self, request, view):
+        if not (request.user and request.user.is_authenticated):
+            return False
         if request.method in permissions.SAFE_METHODS:
             return True
-        return bool(request.user and request.user.is_authenticated and request.user.is_staff)
+        return bool(request.user.is_staff)
 
 
 class CommunityViewSet(viewsets.ModelViewSet):

@@ -5,12 +5,32 @@ from .models import Post, Comment, PollOption
 
 
 class CommentSerializer(serializers.ModelSerializer):
+    """
+    `parent` is writable (send the id of the comment being replied to to
+    create a nested reply; omit/null for a top-level comment). `replies` is
+    a read-only recursive tree — the /comments/ GET endpoint only fetches
+    top-level comments and this walks down from each one.
+    """
     author = UserSerializer(read_only=True)
+    replies = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
-        fields = ['id', 'post', 'author', 'body', 'created_at']
+        fields = ['id', 'post', 'author', 'body', 'parent', 'replies', 'created_at']
         read_only_fields = ['id', 'post', 'author', 'created_at']
+
+    def get_replies(self, obj):
+        children = obj.replies.select_related('author').order_by('created_at')
+        blocked_ids = self.context.get('blocked_ids')
+        if blocked_ids:
+            children = children.exclude(author_id__in=blocked_ids)
+        return CommentSerializer(children, many=True, context=self.context).data
+
+    def validate_parent(self, value):
+        post = self.context.get('post')
+        if value and post and value.post_id != post.id:
+            raise serializers.ValidationError("Can't reply to a comment on a different post.")
+        return value
 
 
 class PollOptionSerializer(serializers.ModelSerializer):
@@ -55,11 +75,11 @@ class PostSerializer(serializers.ModelSerializer):
         model = Post
         fields = [
             'id', 'community', 'author', 'post_type', 'title', 'body', 'image',
-            'like_count', 'comment_count', 'is_liked',
+            'like_count', 'comment_count', 'is_liked', 'is_pinned',
             'poll_options', 'options', 'voted_option_id',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'author', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'author', 'is_pinned', 'created_at', 'updated_at']
 
     def get_is_liked(self, obj):
         if hasattr(obj, 'is_liked_val'):

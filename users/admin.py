@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import User
+from .models import User, Block
 
 
 @admin.register(User)
@@ -45,3 +45,9 @@ class UserAdmin(BaseUserAdmin):
     @admin.action(description='Revoke Support Dashboard access')
     def revoke_support_access(self, request, queryset):
         queryset.update(is_support=False)
+
+
+@admin.register(Block)
+class BlockAdmin(admin.ModelAdmin):
+    list_display = ('blocker', 'blocked', 'created_at')
+    search_fields = ('blocker__username', 'blocked__username')

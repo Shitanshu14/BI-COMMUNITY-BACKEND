@@ -1,4 +1,5 @@
 import uuid
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -53,3 +54,33 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+
+class Block(models.Model):
+    """
+    One row per block relationship (blocker -> blocked). Blocking is
+    one-directional to record ("who did the blocking"), but its *effect* is
+    made mutual everywhere it's checked (posts/comments/search querysets
+    exclude a user from both sides — see posts/views.py, users/views.py) so
+    neither person sees the other's content once either one blocks.
+
+    Blocking also immediately removes any existing follow relationship in
+    either direction (see BlockUserView) so a block can't be worked around
+    by an existing follow.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    blocker = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='blocking_set'
+    )
+    blocked = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='blocked_by_set'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('blocker', 'blocked')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.blocker} blocked {self.blocked}'

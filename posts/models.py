@@ -33,11 +33,16 @@ class Post(models.Model):
         settings.AUTH_USER_MODEL, related_name='liked_posts', blank=True
     )
 
+    # Pinned posts (community admin/moderator only — see PostViewSet.pin).
+    # Pinned posts float to the top of the feed (see get_queryset ordering).
+    is_pinned = models.BooleanField(default=False)
+    pinned_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-is_pinned', '-created_at']
 
     def __str__(self):
         return self.title
@@ -56,6 +61,14 @@ class Comment(models.Model):
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='comments')
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     body = models.TextField()
+
+    # Nested replies: null = top-level comment, set = a reply to another
+    # comment on the same post. Any depth is allowed — the API/UI decide
+    # how deep to visually indent (see posts/serializers.py CommentSerializer).
+    parent = models.ForeignKey(
+        'self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

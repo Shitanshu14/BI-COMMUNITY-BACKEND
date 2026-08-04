@@ -18,6 +18,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close()
             return
 
+        # Previously any authenticated user could join ANY community's chat,
+        # even ones they'd never joined — this brings chat in line with the
+        # "join before you can post" rule already enforced on posts.
+        if not await self.is_member():
+            await self.close(code=4003)
+            return
+
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
 
@@ -46,6 +53,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def chat_message(self, event):
         await self.send(text_data=json.dumps(event))
+
+    @database_sync_to_async
+    def is_member(self):
+        from communities.models import Membership
+        return Membership.objects.filter(
+            user=self.scope['user'], community_id=self.community_id
+        ).exists()
 
     @database_sync_to_async
     def save_message(self, body):

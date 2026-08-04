@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.shortcuts import get_object_or_404
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from rest_framework import generics, permissions, status
@@ -11,6 +12,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from .models import Block
 from .serializers import (
     RegisterSerializer, UserSerializer, UserProfileSerializer,
     PasswordResetRequestSerializer, PasswordResetConfirmSerializer,
@@ -165,10 +167,92 @@ class MeView(APIView):
 
 
 class UserDetailView(generics.RetrieveAPIView):
-    """GET /api/users/<id>/ — public profile view (posts/communities/follow counts)."""
+    """GET /api/users/<id>/ — profile view (posts/communities/follow counts).
+    Requires login, same as posts/communities (no anonymous browsing)."""
     queryset = User.objects.all()
     serializer_class = UserProfileSerializer
-    permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    permission_classes = [permissions.IsAuthenticated]
+
+
+# ----------------------------------------------------------------------
+# Block / unblock
+# ----------------------------------------------------------------------
+
+class BlockUserView(APIView):
+    """
+    POST /api/users/<id>/block/ — blocks the target user. This immediately
+    removes any existing follow relationship in either direction, and from
+    then on neither person sees the other's posts/comments/search results
+    (enforced everywhere Block is checked — see posts/views.py, search).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        target = get_object_or_404(User, pk=pk)
+        if target.id == request.user.id:
+            return Response({'detail': "You can't block yourself."}, status=status.HTTP_400_BAD_REQUEST)
+
+        Block.objects.get_or_create(blocker=request.user, blocked=target)
+
+        from follows.models import Follow
+        Follow.objects.filter(follower=request.user, following=target).delete()
+        Follow.objects.filter(follower=target, following=request.user).delete()
+
+        return Response({'status': 'blocked'})
+
+
+class UnblockUserView(APIView):
+    """POST /api/users/<id>/unblock/"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        deleted, _ = Block.objects.filter(blocker=request.user, blocked_id=pk).delete()
+        return Response({'status': 'unblocked' if deleted else 'not blocked'})
+
+
+class BlockedUsersListView(generics.ListAPIView):
+    """GET /api/users/blocked/ — accounts *I* have blocked (for a Settings page)."""
+    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return User.objects.filter(blocked_by_set__blocker=self.request.user).order_by('username')
+
+
+# ----------------------------------------------------------------------
+# Account deactivation
+# ----------------------------------------------------------------------
+
+class DeactivateAccountView(APIView):
+    """
+    POST /api/users/deactivate/  body: {password}
+
+    Soft-deletes the account: sets is_active=False (Django's built-in flag,
+    already used by the Admin's "Deactivate selected users" action). Once
+    set, every feed/search query that filters on author__is_active=True
+    stops showing this user's posts, and Simple JWT refuses to authenticate
+    them, so they're logged out on their next request. Their data isn't
+    deleted — a superuser can flip is_active back on from Django Admin.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        password = request.data.get('password')
+        if not password or not request.user.check_password(password):
+            return Response({'detail': 'Incorrect password.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        request.user.is_active = False
+        request.user.save(update_fields=['is_active'])
+
+        raw_refresh = request.COOKIES.get(settings.AUTH_COOKIE_REFRESH) or request.data.get('refresh')
+        if raw_refresh:
+            try:
+                RefreshToken(raw_refresh).blacklist()
+            except TokenError:
+                pass
+
+        response = Response({'status': 'deactivated'})
+        return clear_auth_cookies(response)
 
 
 # ----------------------------------------------------------------------
