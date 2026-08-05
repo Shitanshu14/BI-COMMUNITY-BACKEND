@@ -55,12 +55,21 @@ class PostSerializer(serializers.ModelSerializer):
     like_count = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
+    is_saved = serializers.SerializerMethodField()
 
     def get_like_count(self, obj):
         return obj.like_count_val if hasattr(obj, 'like_count_val') else obj.like_count
 
     def get_comment_count(self, obj):
         return obj.comment_count_val if hasattr(obj, 'comment_count_val') else obj.comment_count
+
+    def get_is_saved(self, obj):
+        if hasattr(obj, 'is_saved_val'):
+            return obj.is_saved_val
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return obj.saved_by.filter(user=request.user).exists()
 
     # Poll support: write with a plain list of option strings
     # (`poll_options: ["Option A", "Option B"]`), read back as full
@@ -81,7 +90,7 @@ class PostSerializer(serializers.ModelSerializer):
         model = Post
         fields = [
             'id', 'community', 'author', 'post_type', 'title', 'body', 'image', 'tags',
-            'like_count', 'comment_count', 'is_liked', 'is_pinned',
+            'like_count', 'comment_count', 'is_liked', 'is_saved', 'is_pinned',
             'poll_options', 'options', 'voted_option_id',
             'created_at', 'updated_at',
         ]

@@ -9,7 +9,7 @@ from communities.models import Membership
 from notifications.models import Notification
 from notifications.tasks import create_notification
 from users.models import Block
-from .models import Post, Comment, PollOption, PollVote
+from .models import Post, Comment, PollOption, PollVote, SavedPost
 from .serializers import PostSerializer, CommentSerializer
 
 
@@ -65,6 +65,8 @@ class PostViewSet(viewsets.ModelViewSet):
         post_type = self.request.query_params.get('type')
         if post_type in dict(Post.PostType.choices):
             qs = qs.filter(post_type=post_type)
+        if self.request.query_params.get('saved') == 'true' and user.is_authenticated:
+            qs = qs.filter(saved_by__user=user)
 
         # Previously like_count/comment_count/is_liked were each a property
         # or a per-object .filter().exists() call — for a 20-post feed page
@@ -79,7 +81,10 @@ class PostViewSet(viewsets.ModelViewSet):
             qs = qs.annotate(
                 is_liked_val=Exists(
                     Post.likes.through.objects.filter(post_id=OuterRef('pk'), user_id=user.id)
-                )
+                ),
+                is_saved_val=Exists(
+                    SavedPost.objects.filter(post_id=OuterRef('pk'), user_id=user.id)
+                ),
             )
         # Pinned posts float to the top of every feed, newest first within
         # each group (matches Post.Meta.ordering, kept explicit here since
@@ -108,6 +113,24 @@ class PostViewSet(viewsets.ModelViewSet):
                 target_id=str(post.id),
             )
         return Response({'liked': liked, 'like_count': post.like_count})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated], url_path='save')
+    def save_post(self, request, pk=None):
+        """POST /api/posts/<id>/save/ — toggle bookmark for the current
+        user. Kept separate from `like` (public, notifies the author) —
+        saving is private and author-invisible, more like a personal
+        reading-list entry. (Named save_post since ViewSet already has a
+        DRF-internal `.save`-adjacent machinery on the serializer, not the
+        view — this avoids any confusion reading the two side by side.)"""
+        post = self.get_object()
+        saved_qs = SavedPost.objects.filter(post=post, user=request.user)
+        if saved_qs.exists():
+            saved_qs.delete()
+            saved = False
+        else:
+            SavedPost.objects.create(post=post, user=request.user)
+            saved = True
+        return Response({'saved': saved})
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def pin(self, request, pk=None):

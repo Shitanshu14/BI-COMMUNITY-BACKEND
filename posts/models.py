@@ -126,3 +126,21 @@ class PollVote(models.Model):
         # directly on this model; unique_together here just stops the exact
         # same option being voted twice by the same user.
         unique_together = ('option', 'user')
+
+
+class SavedPost(models.Model):
+    """A user bookmarking a post for later (the 🔖 Save action on a post
+    card). Plain join table — `related_name='saved_by'` on the post side
+    lets PostViewSet annotate is_saved the same way it annotates is_liked."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='saved_posts')
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='saved_by')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'post')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.user} saved {self.post}'

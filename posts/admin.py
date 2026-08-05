@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Post, Comment, PollOption
+from .models import Post, Comment, PollOption, SavedPost
 
 
 class PollOptionInline(admin.TabularInline):
@@ -19,3 +19,9 @@ class PostAdmin(admin.ModelAdmin):
 @admin.register(Comment)
 class CommentAdmin(admin.ModelAdmin):
     list_display = ('post', 'author', 'parent', 'created_at')
+
+
+@admin.register(SavedPost)
+class SavedPostAdmin(admin.ModelAdmin):
+    list_display = ('user', 'post', 'created_at')
+    search_fields = ('user__username', 'post__title')
