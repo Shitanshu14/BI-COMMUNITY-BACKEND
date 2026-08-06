@@ -1,4 +1,6 @@
-from django.db.models import Count, Exists, OuterRef
+import datetime
+
+from django.db.models import Count, Exists, ExpressionWrapper, F, IntegerField, OuterRef
 from django.utils import timezone
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
@@ -36,11 +38,19 @@ class PostViewSet(viewsets.ModelViewSet):
     /api/posts/?community=<id>   -> feed for a community
     /api/posts/?community=<id>&type=question   -> feed filtered to one post_type
                                                     (question | post | poll)
+    /api/posts/?community=<id>&sort=trending   -> feed ranked by engagement from
+                                                    the last 7 days instead of newest-first
     /api/posts/?author=<id>      -> a specific user's posts (profile page grid)
     /api/posts/<id>/like/        -> POST toggle like
     /api/posts/<id>/comments/    -> GET list / POST create comment (nested replies via `parent`)
     /api/posts/<id>/pin/         -> POST toggle pinned (community admin/moderator only)
     """
+
+    # How far back "trending" looks. Without this window an old post that
+    # picked up a lot of likes/comments over months would permanently
+    # outrank anything posted this week, so trending only ever considers
+    # recent activity — same idea as Reddit/HN's "hot" ranking.
+    TRENDING_WINDOW = datetime.timedelta(days=7)
     # Base queryset stays select_related-only here; the heavier annotations
     # (Count, Exists) are applied per-request in get_queryset() below, since
     # is_liked_val depends on the requesting user.
@@ -86,6 +96,25 @@ class PostViewSet(viewsets.ModelViewSet):
                     SavedPost.objects.filter(post_id=OuterRef('pk'), user_id=user.id)
                 ),
             )
+        if self.request.query_params.get('sort') == 'trending':
+            # Simple, cross-database-safe "hot" score built from the
+            # like_count_val/comment_count_val annotations already applied
+            # above (weighting comments higher than likes — leaving a
+            # comment is a stronger engagement signal than a tap). Reusing
+            # those existing Count(..., distinct=True) annotations instead
+            # of aggregating again here avoids the classic Django trap of
+            # stacking two separate Count()s over different reverse
+            # relations in one annotate() call, which silently inflates
+            # both counts via join fan-out. Only posts from the trending
+            # window are ranked at all; pinned posts still float to the top.
+            qs = qs.filter(created_at__gte=timezone.now() - self.TRENDING_WINDOW).annotate(
+                trending_score_val=ExpressionWrapper(
+                    F('like_count_val') * 2 + F('comment_count_val') * 3,
+                    output_field=IntegerField(),
+                )
+            )
+            return qs.order_by('-is_pinned', '-trending_score_val', '-created_at')
+
         # Pinned posts float to the top of every feed, newest first within
         # each group (matches Post.Meta.ordering, kept explicit here since
         # the queryset also gets other filters/annotations applied above).
