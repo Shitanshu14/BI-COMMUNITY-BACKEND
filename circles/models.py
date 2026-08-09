@@ -1,0 +1,111 @@
+import uuid
+from django.conf import settings
+from django.db import models
+
+
+class Circle(models.Model):
+    """
+    A Circle, per the business architecture doc: "Private, invite-only,
+    small verified-user group for collaboration and daily interaction."
+
+    Unlike a Community (public/discoverable, admin-curated — see
+    communities/models.py), a Circle:
+      - is always private (no is_public toggle — it's the point of the model)
+      - can be created by ANY authenticated user, not just staff/admins
+      - only grows via invite (CircleInvite below), never open join/discovery
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    description = models.TextField(blank=True)
+    icon = models.ImageField(upload_to='circle_icons/', blank=True, null=True)
+
+    # Soft cap, not DB-enforced — "small" per the architecture doc. Kept as
+    # a field (rather than a hardcoded constant) so a Pro-tier limit bump
+    # (see Monetization sheet: "Pro ... more Circles, higher limits") can
+    # vary this per circle later without a migration.
+    max_members = models.PositiveIntegerField(default=50)
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='circles_created'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through='CircleMembership', related_name='circles'
+    )
+
+    class Meta:
+        verbose_name_plural = 'Circles'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def member_count(self):
+        return self.members.count()
+
+    @property
+    def is_full(self):
+        return self.member_count >= self.max_members
+
+
+class CircleMembership(models.Model):
+    """Through-table. Owner = creator (or promoted); Member = everyone else."""
+
+    class Role(models.TextChoices):
+        MEMBER = 'member', 'Member'
+        OWNER = 'owner', 'Owner'
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    circle = models.ForeignKey(Circle, on_delete=models.CASCADE)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'circle')
+
+    def __str__(self):
+        return f'{self.user} in {self.circle} ({self.role})'
+
+
+class CircleInvite(models.Model):
+    """
+    A pending/resolved invitation into a Circle. This is the ONLY way to
+    join a Circle (no public "discover + join" path — see Circle docstring),
+    matching the "Circle Loop" from the architecture doc:
+    Create -> Invite -> Signup -> Interaction.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        ACCEPTED = 'accepted', 'Accepted'
+        DECLINED = 'declined', 'Declined'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    circle = models.ForeignKey(Circle, on_delete=models.CASCADE, related_name='invites')
+    invited_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='circle_invites_received'
+    )
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='circle_invites_sent'
+    )
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        # A user can only have one *pending* invite outstanding per circle
+        # at a time — re-inviting after a decline is allowed (that's a new
+        # row), but you can't stack two pending invites to the same person.
+        constraints = [
+            models.UniqueConstraint(
+                fields=['circle', 'invited_user'],
+                condition=models.Q(status='pending'),
+                name='unique_pending_invite_per_circle_user',
+            )
+        ]
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.invited_user} invited to {self.circle} ({self.status})'

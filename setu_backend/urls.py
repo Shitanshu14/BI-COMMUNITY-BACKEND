@@ -18,6 +18,7 @@ urlpatterns = [
     path('api/search/', GlobalSearchView.as_view(), name='global-search'),
     path('api/users/', include('users.urls')),
     path('api/communities/', include('communities.urls')),
+    path('api/circles/', include('circles.urls')),
     path('api/posts/', include('posts.urls')),
     path('api/chat/', include('chat.urls')),
     path('api/verification/', include('verification.urls')),

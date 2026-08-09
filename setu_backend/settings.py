@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     # BI Community apps
     'users',
     'communities',
+    'circles',
     'posts',
     'chat',
     'verification',
