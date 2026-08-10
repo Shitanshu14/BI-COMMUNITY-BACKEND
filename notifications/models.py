@@ -13,6 +13,7 @@ class Notification(models.Model):
 
     class Verb(models.TextChoices):
         POST_LIKED = 'post_liked', 'liked your post'
+        COMMENT_LIKED = 'comment_liked', 'liked your comment'
         POST_COMMENTED = 'post_commented', 'commented on your post'
         COMMENT_REPLIED = 'comment_replied', 'replied to your comment'
         COMMUNITY_JOINED = 'community_joined', 'joined your community'

@@ -32,6 +32,25 @@ class MessageHistoryView(generics.ListAPIView):
         return Message.objects.filter(community_id=community_id).select_related('sender').order_by('-created_at')[:50]
 
 
+class CircleMessageHistoryView(generics.ListAPIView):
+    """
+    GET /api/chat/circle/<circle_id>/history/  -> last messages in a Circle's
+    chat room, for loading the screen before the WebSocket takes over live
+    updates. Mirrors MessageHistoryView exactly, just scoped to Circle
+    membership (see circles/models.CircleMembership) instead of Community
+    Membership.
+    """
+    serializer_class = MessageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        from circles.models import CircleMembership
+        circle_id = self.kwargs['circle_id']
+        if not CircleMembership.objects.filter(user=self.request.user, circle_id=circle_id).exists():
+            raise PermissionDenied('Join this circle to view its chat.')
+        return Message.objects.filter(circle_id=circle_id).select_related('sender').order_by('-created_at')[:50]
+
+
 def _blocked_either_way(a, b):
     return Block.objects.filter(blocker=a, blocked=b).exists() or Block.objects.filter(blocker=b, blocked=a).exists()
 

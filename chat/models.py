@@ -3,20 +3,24 @@ from django.conf import settings
 from django.db import models
 
 from communities.models import Community
+from circles.models import Circle
 
 
 class Message(models.Model):
     """
-    Real-time chat message — either inside a community room (`community`
-    set, `recipient` null) or a 1-on-1 direct message (`recipient` set,
-    `community` null). Exactly one of the two must be set; enforced in
-    ChatConsumer/DMConsumer.save_message rather than a DB constraint since
-    SQLite (local/dev) doesn't enforce CHECK constraints the same way
-    Postgres does.
+    Real-time chat message — inside a community room (`community` set),
+    inside a circle room (`circle` set), or a 1-on-1 direct message
+    (`recipient` set). Exactly one of the three must be set; enforced in
+    ChatConsumer/CircleChatConsumer/DMConsumer.save_message rather than a
+    DB constraint since SQLite (local/dev) doesn't enforce CHECK
+    constraints the same way Postgres does.
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     community = models.ForeignKey(
         Community, on_delete=models.CASCADE, related_name='messages', null=True, blank=True
+    )
+    circle = models.ForeignKey(
+        Circle, on_delete=models.CASCADE, related_name='messages', null=True, blank=True
     )
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='dm_received',

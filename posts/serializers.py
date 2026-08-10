@@ -13,18 +13,36 @@ class CommentSerializer(serializers.ModelSerializer):
     """
     author = UserSerializer(read_only=True)
     replies = serializers.SerializerMethodField()
+    like_count = serializers.SerializerMethodField()
+    is_liked = serializers.SerializerMethodField()
 
     class Meta:
         model = Comment
-        fields = ['id', 'post', 'author', 'body', 'parent', 'replies', 'created_at']
+        fields = ['id', 'post', 'author', 'body', 'parent', 'replies', 'like_count', 'is_liked', 'created_at']
         read_only_fields = ['id', 'post', 'author', 'created_at']
 
     def get_replies(self, obj):
-        children = obj.replies.select_related('author').order_by('created_at')
+        children = obj.replies.select_related('author').prefetch_related('likes').order_by('created_at')
         blocked_ids = self.context.get('blocked_ids')
         if blocked_ids:
             children = children.exclude(author_id__in=blocked_ids)
         return CommentSerializer(children, many=True, context=self.context).data
+
+    def get_like_count(self, obj):
+        # obj.likes is prefetched by the view (see PostViewSet.comments), so
+        # len() on the cached queryset avoids a fresh COUNT per comment —
+        # same reasoning as PollOptionSerializer.get_vote_count below.
+        if hasattr(obj, '_prefetched_objects_cache') and 'likes' in obj._prefetched_objects_cache:
+            return len(obj.likes.all())
+        return obj.like_count
+
+    def get_is_liked(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        if hasattr(obj, '_prefetched_objects_cache') and 'likes' in obj._prefetched_objects_cache:
+            return any(u.id == request.user.id for u in obj.likes.all())
+        return obj.likes.filter(id=request.user.id).exists()
 
     def validate_parent(self, value):
         post = self.context.get('post')
@@ -56,6 +74,11 @@ class PostSerializer(serializers.ModelSerializer):
     comment_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
+    # Plain FK field `community` only ever returns the id — this adds the
+    # name too so cross-community views (the dashboard's trending carousel
+    # in particular) can label "in {community_name}" without a second
+    # request per post.
+    community_name = serializers.CharField(source='community.name', read_only=True)
 
     def get_like_count(self, obj):
         return obj.like_count_val if hasattr(obj, 'like_count_val') else obj.like_count
@@ -89,12 +112,17 @@ class PostSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
         fields = [
-            'id', 'community', 'author', 'post_type', 'title', 'body', 'image', 'tags',
+            'id', 'community', 'community_name', 'author', 'post_type', 'title', 'body', 'image', 'tags',
             'like_count', 'comment_count', 'is_liked', 'is_saved', 'is_pinned',
             'poll_options', 'options', 'voted_option_id',
+            'is_solved', 'solved_at',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'author', 'is_pinned', 'created_at', 'updated_at']
+        # is_solved/solved_at are read-only here on purpose — they're only
+        # ever changed through PostViewSet.mark_solved (author-only, one-way),
+        # never via a plain PATCH, so a stray `is_solved: false` in an edit
+        # payload can't accidentally un-solve a question.
+        read_only_fields = ['id', 'author', 'is_pinned', 'is_solved', 'solved_at', 'created_at', 'updated_at']
 
     def get_is_liked(self, obj):
         if hasattr(obj, 'is_liked_val'):

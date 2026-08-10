@@ -1,6 +1,6 @@
 import datetime
 
-from django.db.models import Count, Exists, ExpressionWrapper, F, IntegerField, OuterRef
+from django.db.models import Count, Exists, ExpressionWrapper, F, IntegerField, OuterRef, Q
 from django.utils import timezone
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
@@ -11,7 +11,7 @@ from communities.models import Membership
 from notifications.models import Notification
 from notifications.tasks import create_notification
 from users.models import Block
-from .models import Post, Comment, PollOption, PollVote, SavedPost
+from .models import Post, PollVote, SavedPost
 from .serializers import PostSerializer, CommentSerializer
 
 
@@ -44,6 +44,7 @@ class PostViewSet(viewsets.ModelViewSet):
     /api/posts/<id>/like/        -> POST toggle like
     /api/posts/<id>/comments/    -> GET list / POST create comment (nested replies via `parent`)
     /api/posts/<id>/pin/         -> POST toggle pinned (community admin/moderator only)
+    /api/posts/<id>/mark_solved/ -> POST one-way solve for a QUESTION post (author only)
     """
 
     # How far back "trending" looks. Without this window an old post that
@@ -65,6 +66,19 @@ class PostViewSet(viewsets.ModelViewSet):
         hidden_ids = blocked_user_ids(user)
         if hidden_ids:
             qs = qs.exclude(author_id__in=hidden_ids)
+
+        # Private communities' posts are only visible to their own members.
+        # Previously this had no check at all — anyone authenticated could
+        # read any private community's feed by passing its id in ?community=,
+        # and a community-less query (the global/trending feed below) would
+        # have leaked private posts to every logged-in user. Public
+        # communities are unaffected. Exists() rather than a join+distinct()
+        # to avoid M2M join fan-out duplicating rows under the Count()
+        # annotations further down.
+        qs = qs.filter(
+            Q(community__is_public=True) |
+            Exists(Membership.objects.filter(community_id=OuterRef('community_id'), user_id=user.id))
+        )
 
         community_id = self.request.query_params.get('community')
         if community_id:
@@ -177,6 +191,27 @@ class PostViewSet(viewsets.ModelViewSet):
         return Response({'is_pinned': post.is_pinned})
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    def mark_solved(self, request, pk=None):
+        """POST /api/posts/<id>/mark_solved/ — the asker flags their own
+        QUESTION post as solved. Deliberately one-way: once is_solved is
+        True this just returns that same state instead of flipping it back,
+        so "Mark solved" can never be clicked into "unsolved" by mistake —
+        the frontend swaps the button for a permanent "Solved" badge as
+        soon as this returns is_solved: true."""
+        post = self.get_object()
+        if post.author_id != request.user.id:
+            raise PermissionDenied('Only the person who asked can mark this solved.')
+        if post.post_type != Post.PostType.QUESTION:
+            return Response({'detail': 'Only questions can be marked solved.'}, status=400)
+
+        if not post.is_solved:
+            post.is_solved = True
+            post.solved_at = timezone.now()
+            post.save(update_fields=['is_solved', 'solved_at'])
+
+        return Response({'is_solved': post.is_solved, 'solved_at': post.solved_at})
+
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def vote(self, request, pk=None):
         """POST /api/posts/<id>/vote/  body: {option_id} — one vote per user;
         voting for a different option moves the existing vote."""
@@ -206,7 +241,10 @@ class PostViewSet(viewsets.ModelViewSet):
         if request.method == 'GET':
             # Only top-level comments here — each one's `replies` field
             # recursively serializes its own children (see CommentSerializer).
-            qs = post.comments.filter(parent__isnull=True).select_related('author')
+            # prefetch_related('likes') lets CommentSerializer read
+            # like_count/is_liked from the cache instead of a query per
+            # comment (and per reply, recursively).
+            qs = post.comments.filter(parent__isnull=True).select_related('author').prefetch_related('likes')
             if hidden_ids:
                 qs = qs.exclude(author_id__in=hidden_ids)
             serializer = CommentSerializer(qs, many=True, context={'request': request, 'blocked_ids': hidden_ids})
@@ -233,3 +271,34 @@ class PostViewSet(viewsets.ModelViewSet):
                 target_id=str(post.id),
             )
         return Response(serializer.data, status=201)
+
+    @action(
+        detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated],
+        url_path='comments/(?P<comment_id>[^/.]+)/like',
+    )
+    def like_comment(self, request, pk=None, comment_id=None):
+        """POST /api/posts/<post_id>/comments/<comment_id>/like/ — toggle
+        like on one comment. Scoped under the post's own detail route
+        (rather than a standalone /api/comments/<id>/like/) so a single
+        get_object() call also confirms the comment actually belongs to
+        this post, matching how replies are validated in CommentSerializer.
+        """
+        post = self.get_object()
+        comment = post.comments.filter(id=comment_id).first()
+        if not comment:
+            return Response({'detail': 'Comment not found on this post.'}, status=404)
+
+        if comment.likes.filter(id=request.user.id).exists():
+            comment.likes.remove(request.user)
+            liked = False
+        else:
+            comment.likes.add(request.user)
+            liked = True
+            if comment.author_id != request.user.id:
+                create_notification.delay(
+                    recipient_id=str(comment.author_id),
+                    verb=Notification.Verb.COMMENT_LIKED,
+                    actor_id=str(request.user.id),
+                    target_id=str(post.id),
+                )
+        return Response({'liked': liked, 'like_count': comment.like_count})

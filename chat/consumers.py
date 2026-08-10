@@ -71,6 +71,74 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
 
+class CircleChatConsumer(AsyncWebsocketConsumer):
+    """
+    WebSocket endpoint: ws://<host>/ws/chat/circle/<circle_id>/
+    One Channels "group" per circle = one live chat room for that Circle's
+    members. Mirrors ChatConsumer exactly, just scoped to Circle
+    membership (circles/models.CircleMembership) instead of Community
+    Membership — Circles are private/invite-only, so this is what actually
+    powers the "For Chat" purpose on the Circle page.
+    """
+
+    async def connect(self):
+        self.circle_id = self.scope['url_route']['kwargs']['circle_id']
+        self.room_group_name = f'circle_chat_{self.circle_id}'
+
+        if not self.scope['user'].is_authenticated:
+            await self.close()
+            return
+
+        if not await self.is_member():
+            await self.close(code=4003)
+            return
+
+        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        data = json.loads(text_data)
+        body = data.get('message', '').strip()
+        if not body:
+            return
+
+        message = await self.save_message(body)
+
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'chat_message',
+                'id': str(message.id),
+                'body': message.body,
+                'sender': self.scope['user'].username,
+                'sender_id': str(self.scope['user'].id),
+                'created_at': message.created_at.isoformat(),
+            },
+        )
+
+    async def chat_message(self, event):
+        await self.send(text_data=json.dumps(event))
+
+    @database_sync_to_async
+    def is_member(self):
+        from circles.models import CircleMembership
+        return CircleMembership.objects.filter(
+            user=self.scope['user'], circle_id=self.circle_id
+        ).exists()
+
+    @database_sync_to_async
+    def save_message(self, body):
+        from .models import Message
+        return Message.objects.create(
+            circle_id=self.circle_id,
+            sender=self.scope['user'],
+            body=body,
+        )
+
+
 class DMConsumer(AsyncWebsocketConsumer):
     """
     WebSocket endpoint: ws://<host>/ws/dm/<other_user_id>/

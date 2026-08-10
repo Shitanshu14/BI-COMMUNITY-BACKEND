@@ -49,6 +49,13 @@ class Post(models.Model):
     is_pinned = models.BooleanField(default=False)
     pinned_at = models.DateTimeField(null=True, blank=True)
 
+    # QUESTION-type posts only: the asker marks their own question solved
+    # once they've got the answer they needed. One-way flag (no "unsolve")
+    # — see PostViewSet.mark_solved — so the UI can safely swap the "Mark
+    # solved" button for a permanent "Solved" badge instead of a toggle.
+    is_solved = models.BooleanField(default=False)
+    solved_at = models.DateTimeField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -80,6 +87,13 @@ class Comment(models.Model):
         'self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies'
     )
 
+    # Same pattern as Post.likes below — a plain M2M rather than a separate
+    # "reaction type" model, since comments only ever get one kind of like
+    # (a heart), matching the post-level like exactly.
+    likes = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, related_name='liked_comments', blank=True
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -87,6 +101,10 @@ class Comment(models.Model):
 
     def __str__(self):
         return f'Comment by {self.author} on {self.post}'
+
+    @property
+    def like_count(self):
+        return self.likes.count()
 
 
 class PollOption(models.Model):
