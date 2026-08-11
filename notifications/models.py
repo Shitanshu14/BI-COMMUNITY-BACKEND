@@ -24,6 +24,8 @@ class Notification(models.Model):
         FOLLOW_ACCEPTED = 'follow_accepted', 'accepted your follow request'
         CIRCLE_INVITED = 'circle_invited', 'invited you to a circle'
         CIRCLE_INVITE_ACCEPTED = 'circle_invite_accepted', 'accepted your circle invite'
+        CIRCLE_QUESTION_ANSWERED = 'circle_question_answered', 'answered your question'
+        CIRCLE_ANSWER_ACCEPTED = 'circle_answer_accepted', 'accepted your answer'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     recipient = models.ForeignKey(

@@ -9,8 +9,11 @@ from rest_framework.views import APIView
 
 from notifications.models import Notification
 from notifications.tasks import create_notification
-from .models import Circle, CircleMembership, CircleInvite
-from .serializers import CircleSerializer, CircleInviteSerializer
+from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer
+from .serializers import (
+    CircleSerializer, CircleInviteSerializer,
+    CircleQuestionSerializer, CircleQuestionDetailSerializer, CircleAnswerSerializer,
+)
 
 User = get_user_model()
 
@@ -181,3 +184,134 @@ class DeclineCircleInviteView(APIView):
         invite.responded_at = timezone.now()
         invite.save(update_fields=['status', 'responded_at'])
         return Response({'status': 'declined'})
+
+
+def _member_circle_or_403(user, circle_id):
+    """Shared guard for every Q&A endpoint below: 404 if the circle
+    doesn't exist, 403 if the requester isn't a member of it (Circles are
+    private — see Circle model docstring)."""
+    circle = get_object_or_404(Circle, pk=circle_id)
+    if not CircleMembership.objects.filter(user=user, circle=circle).exists():
+        return circle, False
+    return circle, True
+
+
+class CircleQuestionListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/circles/<circle_id>/questions/  -> Q&A board for this circle
+    POST /api/circles/<circle_id>/questions/  -> ask a new question
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        return CircleQuestionSerializer
+
+    def _circle(self):
+        circle, is_member = _member_circle_or_403(self.request.user, self.kwargs['circle_id'])
+        if not is_member:
+            return None
+        return circle
+
+    def get_queryset(self):
+        circle = self._circle()
+        if circle is None:
+            return CircleQuestion.objects.none()
+        return CircleQuestion.objects.filter(circle=circle).select_related('author').annotate(
+            answer_count_val=Count('answers', distinct=True)
+        )
+
+    def list(self, request, *args, **kwargs):
+        circle, is_member = _member_circle_or_403(request.user, kwargs['circle_id'])
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        circle, is_member = _member_circle_or_403(request.user, kwargs['circle_id'])
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        question = serializer.save(circle=circle, author=request.user)
+        out = CircleQuestionSerializer(question, context={'request': request})
+        return Response({**out.data, 'answer_count': 0}, status=status.HTTP_201_CREATED)
+
+
+class CircleQuestionDetailView(generics.RetrieveAPIView):
+    """GET /api/circles/<circle_id>/questions/<id>/ -> question + full answer thread."""
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = CircleQuestionDetailSerializer
+
+    def get_object(self):
+        circle, is_member = _member_circle_or_403(self.request.user, self.kwargs['circle_id'])
+        if not is_member:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('You must be a member of this circle.')
+        return get_object_or_404(
+            CircleQuestion.objects.select_related('author').prefetch_related('answers__author'),
+            pk=self.kwargs['pk'], circle=circle,
+        )
+
+
+class CircleAnswerCreateView(APIView):
+    """POST /api/circles/<circle_id>/questions/<pk>/answers/ -> post an answer."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, circle_id, pk):
+        circle, is_member = _member_circle_or_403(request.user, circle_id)
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        question = get_object_or_404(CircleQuestion, pk=pk, circle=circle)
+        body = (request.data.get('body') or '').strip()
+        if not body:
+            return Response({'detail': 'body is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        answer = CircleAnswer.objects.create(question=question, author=request.user, body=body)
+
+        if question.author_id != request.user.id:
+            create_notification.delay(
+                recipient_id=str(question.author_id),
+                verb=Notification.Verb.CIRCLE_QUESTION_ANSWERED,
+                actor_id=str(request.user.id),
+                target_id=str(question.id),
+            )
+        return Response(CircleAnswerSerializer(answer).data, status=status.HTTP_201_CREATED)
+
+
+class CircleAnswerAcceptView(APIView):
+    """
+    POST /api/circles/<circle_id>/questions/<qid>/answers/<aid>/accept/
+    Only the question's own author, or the circle owner, can mark an
+    answer accepted (mirrors how Stack Overflow scopes "accept").
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, circle_id, qid, aid):
+        circle, is_member = _member_circle_or_403(request.user, circle_id)
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        question = get_object_or_404(CircleQuestion, pk=qid, circle=circle)
+        answer = get_object_or_404(CircleAnswer, pk=aid, question=question)
+
+        is_owner = CircleMembership.objects.filter(
+            user=request.user, circle=circle, role=CircleMembership.Role.OWNER
+        ).exists()
+        if question.author_id != request.user.id and not is_owner:
+            return Response(
+                {'detail': "Only the question's author or the circle owner can accept an answer."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        CircleAnswer.objects.filter(question=question).update(is_accepted=False)
+        answer.is_accepted = True
+        answer.save(update_fields=['is_accepted'])
+        question.is_solved = True
+        question.save(update_fields=['is_solved'])
+
+        if answer.author_id != request.user.id:
+            create_notification.delay(
+                recipient_id=str(answer.author_id),
+                verb=Notification.Verb.CIRCLE_ANSWER_ACCEPTED,
+                actor_id=str(request.user.id),
+                target_id=str(question.id),
+            )
+        return Response(CircleAnswerSerializer(answer).data)

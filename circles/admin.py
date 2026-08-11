@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Circle, CircleMembership, CircleInvite
+from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer
 
 
 class CircleMembershipInline(admin.TabularInline):
@@ -20,3 +20,16 @@ class CircleInviteAdmin(admin.ModelAdmin):
     list_display = ('circle', 'invited_user', 'invited_by', 'status', 'created_at')
     list_filter = ('status',)
     search_fields = ('circle__name', 'invited_user__username')
+
+
+class CircleAnswerInline(admin.TabularInline):
+    model = CircleAnswer
+    extra = 0
+
+
+@admin.register(CircleQuestion)
+class CircleQuestionAdmin(admin.ModelAdmin):
+    list_display = ('title', 'circle', 'author', 'is_solved', 'created_at')
+    list_filter = ('is_solved',)
+    search_fields = ('title', 'body', 'circle__name')
+    inlines = [CircleAnswerInline]

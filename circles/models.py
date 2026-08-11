@@ -109,3 +109,50 @@ class CircleInvite(models.Model):
 
     def __str__(self):
         return f'{self.invited_user} invited to {self.circle} ({self.status})'
+
+
+class CircleQuestion(models.Model):
+    """
+    A question posted inside a Circle. Circles are meant for tight-knit,
+    ongoing collaboration, and a flat live chat log makes it hard to find
+    "did anyone ever answer X" later — so alongside the live chat, a
+    Circle also gets a lightweight Q&A board: post a question, members
+    reply with answers, the asker (or the circle owner) can mark one
+    answer as accepted.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    circle = models.ForeignKey(Circle, on_delete=models.CASCADE, related_name='questions')
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='circle_questions'
+    )
+    title = models.CharField(max_length=200)
+    body = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_solved = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.title
+
+    @property
+    def answer_count(self):
+        return self.answers.count()
+
+
+class CircleAnswer(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    question = models.ForeignKey(CircleQuestion, on_delete=models.CASCADE, related_name='answers')
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='circle_answers'
+    )
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_accepted = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['-is_accepted', 'created_at']
+
+    def __str__(self):
+        return f'Answer by {self.author} on {self.question_id}'

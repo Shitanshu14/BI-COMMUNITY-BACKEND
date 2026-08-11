@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from users.serializers import UserSerializer
-from .models import Circle, CircleMembership, CircleInvite
+from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer
 
 
 class CircleSerializer(serializers.ModelSerializer):
@@ -48,3 +48,37 @@ class CircleInviteSerializer(serializers.ModelSerializer):
         model = CircleInvite
         fields = ['id', 'circle', 'invited_user', 'invited_by', 'status', 'created_at', 'responded_at']
         read_only_fields = fields
+
+
+class CircleAnswerSerializer(serializers.ModelSerializer):
+    author = UserSerializer(read_only=True)
+
+    class Meta:
+        model = CircleAnswer
+        fields = ['id', 'question', 'author', 'body', 'created_at', 'is_accepted']
+        read_only_fields = ['id', 'question', 'author', 'created_at', 'is_accepted']
+
+
+class CircleQuestionSerializer(serializers.ModelSerializer):
+    """List/create shape — no nested answers, just a count, so the board
+    stays cheap to load with many questions."""
+    author = UserSerializer(read_only=True)
+    answer_count = serializers.SerializerMethodField()
+
+    def get_answer_count(self, obj):
+        if hasattr(obj, 'answer_count_val'):
+            return obj.answer_count_val
+        return obj.answer_count
+
+    class Meta:
+        model = CircleQuestion
+        fields = ['id', 'circle', 'author', 'title', 'body', 'created_at', 'is_solved', 'answer_count']
+        read_only_fields = ['id', 'circle', 'author', 'created_at', 'is_solved', 'answer_count']
+
+
+class CircleQuestionDetailSerializer(CircleQuestionSerializer):
+    """Single-question view — full answer thread included."""
+    answers = CircleAnswerSerializer(many=True, read_only=True)
+
+    class Meta(CircleQuestionSerializer.Meta):
+        fields = CircleQuestionSerializer.Meta.fields + ['answers']
