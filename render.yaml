@@ -1,4 +1,20 @@
 services:
+  # ------------------------------------------------------------------
+  # Redis — required by BOTH Channels (websockets for chat/notifications)
+  # AND Celery (create_notification.delay / send_verification_email.delay
+  # etc, called from circles/follows/posts/communities/users views).
+  # Without this block, settings.py's REDIS_HOST/REDIS_PORT silently fall
+  # back to 127.0.0.1:6379 — which doesn't exist on the web service's own
+  # container. Every request that hits a `.delay(...)` call (invite,
+  # follow, vote, comment, join, register, resend-verification, password
+  # reset) then hangs trying to reach a broker that isn't there, and
+  # either times out (→ the "everything is slow" symptom) or the
+  # connection is refused outright (→ the 500s on those exact actions).
+  - type: redis
+    name: bi-community-redis
+    plan: free
+    ipAllowList: []
+
   - type: web
     name: bi-community-backend
     runtime: python
@@ -23,3 +39,81 @@ services:
         value: "None"
       - key: AUTH_COOKIE_SECURE
         value: "True"
+      # Wires the redis service above into REDIS_HOST/REDIS_PORT (which
+      # CHANNEL_LAYERS and CELERY_BROKER_URL/CELERY_RESULT_BACKEND are all
+      # built from in settings.py). This is the actual fix for the
+      # random 500s / slowness on invite, follow, vote, comment, join,
+      # register, and password-reset.
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: bi-community-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: bi-community-redis
+          property: port
+      # ------------------------------------------------------------
+      # Database — WITHOUT this, USE_SQLITE defaults to True (see
+      # .env.example) and the app silently runs on the on-disk
+      # db.sqlite3 file even in production. That file lives on Render's
+      # EPHEMERAL disk (wiped on every deploy/restart) and SQLite can't
+      # handle concurrent writes from an ASGI server — under any real
+      # concurrency (two people voting/commenting/inviting at once) you
+      # get intermittent "database is locked" → 500s, which is exactly
+      # the pattern in the screenshots. Point this at a real Postgres
+      # (e.g. Supabase) instead. `sync: false` means Render won't store
+      # these in this file — fill them in once under the service's
+      # Environment tab in the dashboard.
+      - key: USE_SQLITE
+        value: "False"
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
+
+  # ------------------------------------------------------------------
+  # Celery worker — actually processes the jobs queued by `.delay(...)`
+  # (create_notification, send_verification_email, etc). Without this,
+  # even after Redis is wired up above, those jobs just pile up in the
+  # queue forever and nothing consumes them — e.g. the bell icon /
+  # verification emails would never actually fire, just silently no-op.
+  # This was referenced in notifications/tasks.py's docstring and the
+  # README but was never actually defined here.
+  - type: worker
+    name: bi-community-celery-worker
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A setu_backend worker -l info"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: REDIS_HOST
+        fromService:
+          type: redis
+          name: bi-community-redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          type: redis
+          name: bi-community-redis
+          property: port
+      - key: USE_SQLITE
+        value: "False"
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "5432"
