@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from users.serializers import UserSerializer
-from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer
+from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer, CircleEvent, CircleEventRSVP
 
 
 class CircleSerializer(serializers.ModelSerializer):
@@ -23,6 +23,8 @@ class CircleSerializer(serializers.ModelSerializer):
         return CircleMembership.objects.filter(user=request.user, circle=obj).exists()
 
     def get_is_owner(self, obj):
+        if hasattr(obj, 'is_owner_val'):
+            return obj.is_owner_val
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
@@ -82,3 +84,31 @@ class CircleQuestionDetailSerializer(CircleQuestionSerializer):
 
     class Meta(CircleQuestionSerializer.Meta):
         fields = CircleQuestionSerializer.Meta.fields + ['answers']
+
+
+class CircleEventSerializer(serializers.ModelSerializer):
+    created_by = UserSerializer(read_only=True)
+    going_count = serializers.SerializerMethodField()
+    my_rsvp = serializers.SerializerMethodField()  # 'going' | 'maybe' | 'declined' | None
+    is_past = serializers.BooleanField(read_only=True)
+
+    def get_going_count(self, obj):
+        if hasattr(obj, 'going_count_val'):
+            return obj.going_count_val
+        return obj.going_count
+
+    def get_my_rsvp(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        rsvp = obj.rsvp_set.filter(user=request.user).first()
+        return rsvp.status if rsvp else None
+
+    class Meta:
+        model = CircleEvent
+        fields = [
+            'id', 'circle', 'created_by', 'title', 'description',
+            'starts_at', 'ends_at', 'location', 'created_at',
+            'going_count', 'my_rsvp', 'is_past',
+        ]
+        read_only_fields = ['id', 'circle', 'created_by', 'created_at']

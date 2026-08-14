@@ -36,6 +36,10 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=['sender', 'recipient', 'created_at']),
             models.Index(fields=['recipient', 'sender', 'created_at']),
+            # DMUnreadCountView polls exactly this filter shape every 20s
+            # for every signed-in user (sidebar badge) — recipient+created_at
+            # above doesn't help much when read_at is the selective column.
+            models.Index(fields=['recipient', 'read_at']),
         ]
 
     def __str__(self):

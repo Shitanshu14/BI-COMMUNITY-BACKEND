@@ -8,6 +8,11 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     """Public-facing profile representation (used on feed cards, member lists, etc.)"""
 
+    # Same cap as RegisterSerializer below — this serializer is also used
+    # for PATCH /api/users/me/, so without this override a username could
+    # be edited back up to Django's default 150-char limit.
+    username = serializers.CharField(min_length=3, max_length=20)
+
     class Meta:
         model = User
         fields = [
@@ -101,6 +106,11 @@ class UserProfileSerializer(UserSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
+    # AbstractUser's default username max_length (150) is far looser than
+    # what actually makes sense for a display handle in this app — cap it
+    # here rather than loosening every card/sidebar layout to cope with a
+    # 150-char username.
+    username = serializers.CharField(min_length=3, max_length=20)
 
     class Meta:
         model = User

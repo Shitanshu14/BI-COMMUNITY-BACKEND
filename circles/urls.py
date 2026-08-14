@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CircleViewSet, MyCircleInvitesView, AcceptCircleInviteView, DeclineCircleInviteView,
     CircleQuestionListCreateView, CircleQuestionDetailView, CircleAnswerCreateView, CircleAnswerAcceptView,
+    CircleEventListCreateView, CircleEventRSVPView, CircleEventDeleteView,
 )
 
 router = DefaultRouter()
@@ -25,4 +26,9 @@ urlpatterns = [
         '<uuid:circle_id>/questions/<uuid:qid>/answers/<uuid:aid>/accept/',
         CircleAnswerAcceptView.as_view(), name='circle-answer-accept',
     ),
+
+    # Circle events (schedule/RSVP) — see circles/models.py CircleEvent docstring
+    path('<uuid:circle_id>/events/', CircleEventListCreateView.as_view(), name='circle-event-list'),
+    path('<uuid:circle_id>/events/<uuid:pk>/rsvp/', CircleEventRSVPView.as_view(), name='circle-event-rsvp'),
+    path('<uuid:circle_id>/events/<uuid:pk>/', CircleEventDeleteView.as_view(), name='circle-event-delete'),
 ] + router.urls

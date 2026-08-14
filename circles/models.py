@@ -111,6 +111,70 @@ class CircleInvite(models.Model):
         return f'{self.invited_user} invited to {self.circle} ({self.status})'
 
 
+class CircleEvent(models.Model):
+    """
+    A scheduled event/session for a Circle — call, meetup, deadline,
+    whatever the group wants on a shared calendar. Any member can create
+    one (not owner-only) since Circles are meant for tight collaboration
+    between equals, not a broadcast channel.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    circle = models.ForeignKey(Circle, on_delete=models.CASCADE, related_name='events')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='circle_events_created'
+    )
+    title = models.CharField(max_length=150)
+    description = models.TextField(blank=True)
+    starts_at = models.DateTimeField()
+    ends_at = models.DateTimeField(null=True, blank=True)
+
+    # Deliberately a single freeform string, not separate
+    # "physical address" / "video link" fields — a circle's event might be
+    # a Zoom call, a Discord voice channel, or an actual coffee shop, and
+    # forcing a choice between two field types just to store "wherever we
+    # meet" would be over-engineering for a small-group scheduling feature.
+    location = models.CharField(max_length=300, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    rsvps = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through='CircleEventRSVP', related_name='circle_events_rsvped'
+    )
+
+    class Meta:
+        ordering = ['starts_at']
+
+    def __str__(self):
+        return f'{self.title} ({self.circle})'
+
+    @property
+    def is_past(self):
+        from django.utils import timezone
+        return self.starts_at < timezone.now()
+
+    @property
+    def going_count(self):
+        return self.rsvp_set.filter(status=CircleEventRSVP.Status.GOING).count()
+
+
+class CircleEventRSVP(models.Model):
+    class Status(models.TextChoices):
+        GOING = 'going', 'Going'
+        MAYBE = 'maybe', 'Maybe'
+        DECLINED = 'declined', "Can't go"
+
+    event = models.ForeignKey(CircleEvent, on_delete=models.CASCADE, related_name='rsvp_set')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.GOING)
+    responded_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('event', 'user')
+
+    def __str__(self):
+        return f'{self.user} -> {self.event} ({self.status})'
+
+
 class CircleQuestion(models.Model):
     """
     A question posted inside a Circle. Circles are meant for tight-knit,

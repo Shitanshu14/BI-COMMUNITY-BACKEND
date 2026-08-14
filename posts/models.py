@@ -3,6 +3,7 @@ from django.conf import settings
 from django.db import models
 
 from communities.models import Community
+from setu_backend.imaging import compress_uploaded_image
 
 
 class Post(models.Model):
@@ -40,6 +41,15 @@ class Post(models.Model):
     # requirement yet, so a normalized table would be premature.
     tags = models.JSONField(default=list, blank=True)
 
+    # Optional external links attached to a post (portfolio, live demo,
+    # repo, article URL, Instagram — anything). Deliberately generic rather
+    # than fixed "repo_url"/"live_url" fields: a Project post from a
+    # developer might link a repo, one from an artist might link a
+    # portfolio or Behance page. Stored as a flat list of "Label|||URL"
+    # strings (see PostSerializer.links) so no extra table/migration is
+    # needed if the shape ever needs to grow.
+    links = models.JSONField(default=list, blank=True)
+
     likes = models.ManyToManyField(
         settings.AUTH_USER_MODEL, related_name='liked_posts', blank=True
     )
@@ -61,9 +71,26 @@ class Post(models.Model):
 
     class Meta:
         ordering = ['-is_pinned', '-created_at']
+        indexes = [
+            # Matches PostViewSet.get_queryset()'s community feed query
+            # exactly (filter by community, order by pinned then recency) —
+            # without this, that ordering falls back to a full sort once a
+            # community has more than a page or two of posts.
+            models.Index(fields=['community', '-is_pinned', '-created_at']),
+        ]
 
     def __str__(self):
         return self.title
+
+    def save(self, *args, **kwargs):
+        # `_committed` is False only for a file that was just attached in
+        # this request (not yet written to storage) — this guard stops a
+        # post whose *text* is being edited later from re-processing (and
+        # re-compressing, lossily, again) an image that was already
+        # resized on a previous save.
+        if self.image and not self.image._committed:
+            compress_uploaded_image(self.image)
+        super().save(*args, **kwargs)
 
     @property
     def like_count(self):

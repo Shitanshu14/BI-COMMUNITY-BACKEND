@@ -22,10 +22,19 @@ class CommentSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'post', 'author', 'created_at']
 
     def get_replies(self, obj):
-        children = obj.replies.select_related('author').prefetch_related('likes').order_by('created_at')
+        # `children_map` (built once by the view — see PostViewSet.comments)
+        # holds every comment on the post already grouped by parent_id, so
+        # walking the tree here is a dict lookup, not a query. Falls back to
+        # a live query only when serializing a comment outside that context
+        # (e.g. the create-comment response for a single new reply).
+        children_map = self.context.get('children_map')
+        if children_map is not None:
+            children = children_map.get(obj.id, [])
+        else:
+            children = list(obj.replies.select_related('author').prefetch_related('likes').order_by('created_at'))
         blocked_ids = self.context.get('blocked_ids')
         if blocked_ids:
-            children = children.exclude(author_id__in=blocked_ids)
+            children = [c for c in children if c.author_id not in blocked_ids]
         return CommentSerializer(children, many=True, context=self.context).data
 
     def get_like_count(self, obj):
@@ -109,10 +118,18 @@ class PostSerializer(serializers.ModelSerializer):
         child=serializers.CharField(max_length=40), required=False, default=list
     )
 
+    # Optional external links (see Post.links docstring). Each entry is a
+    # "Label|||URL" string — kept flat/stringy like `tags` and `options` so
+    # multipart form posts from the composer can send repeated `links`
+    # fields without needing a nested JSON body.
+    links = serializers.ListField(
+        child=serializers.CharField(max_length=300), required=False, default=list
+    )
+
     class Meta:
         model = Post
         fields = [
-            'id', 'community', 'community_name', 'author', 'post_type', 'title', 'body', 'image', 'tags',
+            'id', 'community', 'community_name', 'author', 'post_type', 'title', 'body', 'image', 'tags', 'links',
             'like_count', 'comment_count', 'is_liked', 'is_saved', 'is_pinned',
             'poll_options', 'options', 'voted_option_id',
             'is_solved', 'solved_at',

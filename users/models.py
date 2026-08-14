@@ -3,6 +3,8 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
+from setu_backend.imaging import compress_uploaded_image
+
 
 class User(AbstractUser):
     """
@@ -54,6 +56,14 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.email
+
+    def save(self, *args, **kwargs):
+        # Same reasoning as Post.save() — see setu_backend/imaging.py.
+        # Avatars are never displayed above ~72px anywhere in the app
+        # (index.css .avatar), so a smaller cap than post images is fine.
+        if self.avatar and not self.avatar._committed:
+            compress_uploaded_image(self.avatar, max_dimension=400, quality=85)
+        super().save(*args, **kwargs)
 
 
 class Block(models.Model):

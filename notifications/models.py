@@ -26,6 +26,7 @@ class Notification(models.Model):
         CIRCLE_INVITE_ACCEPTED = 'circle_invite_accepted', 'accepted your circle invite'
         CIRCLE_QUESTION_ANSWERED = 'circle_question_answered', 'answered your question'
         CIRCLE_ANSWER_ACCEPTED = 'circle_answer_accepted', 'accepted your answer'
+        CIRCLE_EVENT_CREATED = 'circle_event_created', 'scheduled an event in a circle'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     recipient = models.ForeignKey(
@@ -47,6 +48,12 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            # The bell icon polls "how many unread do I have" + "list my
+            # notifications" against exactly this filter shape, so it's
+            # one of the most frequently-run queries in the app.
+            models.Index(fields=['recipient', 'is_read']),
+        ]
 
     def __str__(self):
         return f'{self.recipient} — {self.get_verb_display()}'

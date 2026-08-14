@@ -227,9 +227,15 @@ class PostViewSet(viewsets.ModelViewSet):
         PollVote.objects.filter(option__post=post, user=request.user).delete()
         PollVote.objects.create(option=option, user=request.user)
 
+        # NOTE: `post.poll_options.all()` would silently return the counts
+        # from the viewset's class-level `prefetch_related('poll_options__votes')`
+        # cache — i.e. the vote counts *before* the vote above was cast,
+        # since Django reuses prefetched results for `.all()`/`.count()`.
+        # `.annotate()` always issues a fresh query, bypassing that cache,
+        # so the vote just cast is reflected immediately.
         options = [
-            {'id': str(o.id), 'text': o.text, 'vote_count': o.vote_count}
-            for o in post.poll_options.all()
+            {'id': str(o['id']), 'text': o['text'], 'vote_count': o['vote_count']}
+            for o in post.poll_options.annotate(vote_count=Count('votes')).order_by('order').values('id', 'text', 'vote_count')
         ]
         return Response({'voted_option_id': str(option.id), 'options': options})
 
@@ -239,15 +245,31 @@ class PostViewSet(viewsets.ModelViewSet):
         hidden_ids = blocked_user_ids(request.user)
 
         if request.method == 'GET':
-            # Only top-level comments here — each one's `replies` field
-            # recursively serializes its own children (see CommentSerializer).
-            # prefetch_related('likes') lets CommentSerializer read
-            # like_count/is_liked from the cache instead of a query per
-            # comment (and per reply, recursively).
-            qs = post.comments.filter(parent__isnull=True).select_related('author').prefetch_related('likes')
+            # Fetch EVERY comment on the post (all nesting levels) in one
+            # query, then group by parent_id in Python. Previously each
+            # top-level comment's `replies` field fired its own query (and
+            # each of *those* fired another for grandchildren, etc.) — for
+            # a post with 20 top-level comments that's 20+ extra queries
+            # just to render one page. children_map turns the recursive
+            # CommentSerializer.get_replies into a dict lookup instead.
+            all_comments = list(
+                post.comments.select_related('author').prefetch_related('likes').order_by('created_at')
+            )
             if hidden_ids:
-                qs = qs.exclude(author_id__in=hidden_ids)
-            serializer = CommentSerializer(qs, many=True, context={'request': request, 'blocked_ids': hidden_ids})
+                all_comments = [c for c in all_comments if c.author_id not in hidden_ids]
+
+            children_map = {}
+            top_level = []
+            for c in all_comments:
+                if c.parent_id is None:
+                    top_level.append(c)
+                else:
+                    children_map.setdefault(c.parent_id, []).append(c)
+
+            serializer = CommentSerializer(
+                top_level, many=True,
+                context={'request': request, 'blocked_ids': hidden_ids, 'children_map': children_map},
+            )
             return Response(serializer.data)
 
         serializer = CommentSerializer(data=request.data, context={'request': request, 'post': post, 'blocked_ids': hidden_ids})

@@ -9,10 +9,14 @@ from rest_framework.views import APIView
 
 from notifications.models import Notification
 from notifications.tasks import create_notification
-from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer
+from .models import (
+    Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer,
+    CircleEvent, CircleEventRSVP,
+)
 from .serializers import (
     CircleSerializer, CircleInviteSerializer,
     CircleQuestionSerializer, CircleQuestionDetailSerializer, CircleAnswerSerializer,
+    CircleEventSerializer,
 )
 
 User = get_user_model()
@@ -63,7 +67,12 @@ class CircleViewSet(viewsets.ModelViewSet):
             qs = qs.annotate(
                 is_member_val=Exists(
                     CircleMembership.objects.filter(user=user, circle=OuterRef('pk'))
-                )
+                ),
+                is_owner_val=Exists(
+                    CircleMembership.objects.filter(
+                        user=user, circle=OuterRef('pk'), role=CircleMembership.Role.OWNER
+                    )
+                ),
             )
         return qs
 
@@ -315,3 +324,80 @@ class CircleAnswerAcceptView(APIView):
                 target_id=str(question.id),
             )
         return Response(CircleAnswerSerializer(answer).data)
+
+
+class CircleEventListCreateView(generics.ListCreateAPIView):
+    """
+    GET  /api/circles/<circle_id>/events/  -> upcoming + past events, soonest first
+    POST /api/circles/<circle_id>/events/  -> schedule a new event (any member)
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = CircleEventSerializer
+
+    def get_queryset(self):
+        circle, is_member = _member_circle_or_403(self.request.user, self.kwargs['circle_id'])
+        if not is_member:
+            return CircleEvent.objects.none()
+        return CircleEvent.objects.filter(circle=circle).select_related('created_by').prefetch_related('rsvp_set')
+
+    def list(self, request, *args, **kwargs):
+        circle, is_member = _member_circle_or_403(request.user, kwargs['circle_id'])
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        circle, is_member = _member_circle_or_403(request.user, kwargs['circle_id'])
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        event = serializer.save(circle=circle, created_by=request.user)
+        # Creator is implicitly "going" — no need to RSVP to your own event.
+        CircleEventRSVP.objects.create(event=event, user=request.user, status=CircleEventRSVP.Status.GOING)
+
+        for member in circle.members.exclude(id=request.user.id):
+            create_notification.delay(
+                recipient_id=str(member.id),
+                verb=Notification.Verb.CIRCLE_EVENT_CREATED,
+                actor_id=str(request.user.id),
+                target_id=str(event.id),
+            )
+        out = CircleEventSerializer(event, context={'request': request})
+        return Response(out.data, status=status.HTTP_201_CREATED)
+
+
+class CircleEventRSVPView(APIView):
+    """POST /api/circles/<circle_id>/events/<pk>/rsvp/  {status: going|maybe|declined}"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, circle_id, pk):
+        circle, is_member = _member_circle_or_403(request.user, circle_id)
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        event = get_object_or_404(CircleEvent, pk=pk, circle=circle)
+        rsvp_status = request.data.get('status')
+        if rsvp_status not in CircleEventRSVP.Status.values:
+            return Response({'detail': 'status must be one of going/maybe/declined.'}, status=status.HTTP_400_BAD_REQUEST)
+        CircleEventRSVP.objects.update_or_create(
+            event=event, user=request.user, defaults={'status': rsvp_status}
+        )
+        return Response(CircleEventSerializer(event, context={'request': request}).data)
+
+
+class CircleEventDeleteView(APIView):
+    """DELETE /api/circles/<circle_id>/events/<pk>/ — creator or circle owner only."""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, circle_id, pk):
+        circle, is_member = _member_circle_or_403(request.user, circle_id)
+        if not is_member:
+            return Response({'detail': 'You must be a member of this circle.'}, status=status.HTTP_403_FORBIDDEN)
+        event = get_object_or_404(CircleEvent, pk=pk, circle=circle)
+        is_owner = CircleMembership.objects.filter(
+            user=request.user, circle=circle, role=CircleMembership.Role.OWNER
+        ).exists()
+        if event.created_by_id != request.user.id and not is_owner:
+            return Response({'detail': 'Only the event creator or circle owner can delete this.'}, status=status.HTTP_403_FORBIDDEN)
+        event.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
