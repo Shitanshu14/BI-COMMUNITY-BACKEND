@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from notifications.models import Notification
-from notifications.tasks import create_notification
+from notifications.tasks import notify
 from users.serializers import UserSerializer
 from .models import Follow
 from .serializers import FollowRequestSerializer
@@ -41,12 +41,12 @@ class FollowUserView(APIView):
 
         if created:
             if follow.status == Follow.Status.ACCEPTED:
-                create_notification.delay(
+                notify(
                     recipient_id=str(target.id), verb=Notification.Verb.NEW_FOLLOWER,
                     actor_id=str(request.user.id), target_id=str(request.user.id),
                 )
             else:
-                create_notification.delay(
+                notify(
                     recipient_id=str(target.id), verb=Notification.Verb.FOLLOW_REQUESTED,
                     actor_id=str(request.user.id), target_id=str(follow.id),
                 )
@@ -104,7 +104,7 @@ def accept_follow_request(request, pk):
     follow = get_object_or_404(Follow, pk=pk, following=request.user, status=Follow.Status.PENDING)
     follow.status = Follow.Status.ACCEPTED
     follow.save(update_fields=['status'])
-    create_notification.delay(
+    notify(
         recipient_id=str(follow.follower_id), verb=Notification.Verb.FOLLOW_ACCEPTED,
         actor_id=str(request.user.id), target_id=str(request.user.id),
     )

@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils import timezone
 
 from notifications.models import Notification
-from notifications.tasks import create_notification
+from notifications.tasks import notify
 from .models import VerificationRequest
 
 
@@ -23,7 +23,7 @@ class VerificationRequestAdmin(admin.ModelAdmin):
             vr.save()
             vr.user.is_verified = True
             vr.user.save(update_fields=['is_verified'])
-            create_notification.delay(
+            notify(
                 recipient_id=str(vr.user_id),
                 verb=Notification.Verb.VERIFICATION_APPROVED,
                 actor_id=str(request.user.id),
@@ -37,7 +37,7 @@ class VerificationRequestAdmin(admin.ModelAdmin):
             vr.reviewed_by = request.user
             vr.reviewed_at = timezone.now()
             vr.save()
-            create_notification.delay(
+            notify(
                 recipient_id=str(vr.user_id),
                 verb=Notification.Verb.VERIFICATION_REJECTED,
                 actor_id=str(request.user.id),

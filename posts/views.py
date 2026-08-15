@@ -9,7 +9,7 @@ from rest_framework.response import Response
 
 from communities.models import Membership
 from notifications.models import Notification
-from notifications.tasks import create_notification
+from notifications.tasks import notify
 from users.models import Block
 from .models import Post, PollVote, SavedPost
 from .serializers import PostSerializer, CommentSerializer
@@ -149,7 +149,7 @@ class PostViewSet(viewsets.ModelViewSet):
         else:
             post.likes.add(request.user)
             liked = True
-            create_notification.delay(
+            notify(
                 recipient_id=str(post.author_id),
                 verb=Notification.Verb.POST_LIKED,
                 actor_id=str(request.user.id),
@@ -279,14 +279,14 @@ class PostViewSet(viewsets.ModelViewSet):
         # A reply notifies the parent comment's author; a top-level comment
         # notifies the post's author (skip either if that'd notify yourself).
         if comment.parent_id and comment.parent.author_id != request.user.id:
-            create_notification.delay(
+            notify(
                 recipient_id=str(comment.parent.author_id),
                 verb=Notification.Verb.COMMENT_REPLIED,
                 actor_id=str(request.user.id),
                 target_id=str(post.id),
             )
         elif not comment.parent_id and post.author_id != request.user.id:
-            create_notification.delay(
+            notify(
                 recipient_id=str(post.author_id),
                 verb=Notification.Verb.POST_COMMENTED,
                 actor_id=str(request.user.id),
@@ -317,7 +317,7 @@ class PostViewSet(viewsets.ModelViewSet):
             comment.likes.add(request.user)
             liked = True
             if comment.author_id != request.user.id:
-                create_notification.delay(
+                notify(
                     recipient_id=str(comment.author_id),
                     verb=Notification.Verb.COMMENT_LIKED,
                     actor_id=str(request.user.id),

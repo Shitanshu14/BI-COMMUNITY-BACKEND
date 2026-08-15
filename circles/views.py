@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from notifications.models import Notification
-from notifications.tasks import create_notification
+from notifications.tasks import notify
 from .models import (
     Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer,
     CircleEvent, CircleEventRSVP,
@@ -101,7 +101,7 @@ class CircleViewSet(viewsets.ModelViewSet):
         if not created:
             return Response({'detail': 'An invite is already pending for that user.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        create_notification.delay(
+        notify(
             recipient_id=str(invited_user.id),
             verb=Notification.Verb.CIRCLE_INVITED,
             actor_id=str(request.user.id),
@@ -172,7 +172,7 @@ class AcceptCircleInviteView(APIView):
         CircleMembership.objects.get_or_create(user=request.user, circle=invite.circle)
 
         if invite.invited_by_id:
-            create_notification.delay(
+            notify(
                 recipient_id=str(invite.invited_by_id),
                 verb=Notification.Verb.CIRCLE_INVITE_ACCEPTED,
                 actor_id=str(request.user.id),
@@ -277,7 +277,7 @@ class CircleAnswerCreateView(APIView):
         answer = CircleAnswer.objects.create(question=question, author=request.user, body=body)
 
         if question.author_id != request.user.id:
-            create_notification.delay(
+            notify(
                 recipient_id=str(question.author_id),
                 verb=Notification.Verb.CIRCLE_QUESTION_ANSWERED,
                 actor_id=str(request.user.id),
@@ -317,7 +317,7 @@ class CircleAnswerAcceptView(APIView):
         question.save(update_fields=['is_solved'])
 
         if answer.author_id != request.user.id:
-            create_notification.delay(
+            notify(
                 recipient_id=str(answer.author_id),
                 verb=Notification.Verb.CIRCLE_ANSWER_ACCEPTED,
                 actor_id=str(request.user.id),
@@ -357,7 +357,7 @@ class CircleEventListCreateView(generics.ListCreateAPIView):
         CircleEventRSVP.objects.create(event=event, user=request.user, status=CircleEventRSVP.Status.GOING)
 
         for member in circle.members.exclude(id=request.user.id):
-            create_notification.delay(
+            notify(
                 recipient_id=str(member.id),
                 verb=Notification.Verb.CIRCLE_EVENT_CREATED,
                 actor_id=str(request.user.id),

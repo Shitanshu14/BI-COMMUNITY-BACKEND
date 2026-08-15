@@ -4,7 +4,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from notifications.models import Notification
-from notifications.tasks import create_notification
+from notifications.tasks import notify
 from .models import Community, Membership
 from .serializers import CommunitySerializer
 
@@ -72,7 +72,7 @@ class CommunityViewSet(viewsets.ModelViewSet):
         community = self.get_object()
         _, created = Membership.objects.get_or_create(user=request.user, community=community)
         if created and community.created_by_id:
-            create_notification.delay(
+            notify(
                 recipient_id=str(community.created_by_id),
                 verb=Notification.Verb.COMMUNITY_JOINED,
                 actor_id=str(request.user.id),
