@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'verification',
     'notifications',
     'follows',
+    'support',
 ]
 
 MIDDLEWARE = [

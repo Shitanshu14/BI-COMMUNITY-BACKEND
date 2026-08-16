@@ -157,7 +157,15 @@ class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(UserProfileSerializer(request.user, context={'request': request}).data)
+        data = UserProfileSerializer(request.user, context={'request': request}).data
+        # Self-only fields — deliberately not on UserProfileSerializer
+        # itself (that's also used for *other* people's profiles via
+        # UserDetailView below, and who's on the support team isn't
+        # public information). The frontend uses these to decide whether
+        # to show the "Support Dashboard" sidebar link at all.
+        data['is_support'] = request.user.is_support
+        data['is_staff'] = request.user.is_staff
+        return Response(data)
 
     def patch(self, request):
         serializer = UserSerializer(request.user, data=request.data, partial=True)

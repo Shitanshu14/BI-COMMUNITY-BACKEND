@@ -22,6 +22,11 @@ class MessageHistoryView(generics.ListAPIView):
     """
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # This view's own `[:50]` slice below IS the pagination — the
+    # project-wide PageNumberPagination (PAGE_SIZE=20) would otherwise
+    # wrap on top of it and silently truncate 50 messages down to 20,
+    # with no `next` link the frontend ever follows to get the rest.
+    pagination_class = None
 
     def get_queryset(self):
         community_id = self.kwargs['community_id']
@@ -42,6 +47,7 @@ class CircleMessageHistoryView(generics.ListAPIView):
     """
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # see MessageHistoryView.pagination_class
 
     def get_queryset(self):
         from circles.models import CircleMembership
@@ -69,6 +75,7 @@ class DMHistoryView(generics.ListAPIView):
     """
     serializer_class = MessageSerializer
     permission_classes = [permissions.IsAuthenticated]
+    pagination_class = None  # see MessageHistoryView.pagination_class
 
     def get_queryset(self):
         other = get_object_or_404(User, pk=self.kwargs['user_id'])

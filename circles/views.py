@@ -281,7 +281,12 @@ class CircleAnswerCreateView(APIView):
                 recipient_id=str(question.author_id),
                 verb=Notification.Verb.CIRCLE_QUESTION_ANSWERED,
                 actor_id=str(request.user.id),
-                target_id=str(question.id),
+                # circle.id, not question.id — the frontend route for a
+                # circle question is nested (/circles/<circle>/qa/<qid>) and
+                # Notification only carries one generic target_id, so this
+                # points at the circle's Q&A list rather than the exact
+                # question (good enough: it's right there in the list).
+                target_id=str(circle.id),
             )
         return Response(CircleAnswerSerializer(answer).data, status=status.HTTP_201_CREATED)
 
@@ -321,7 +326,7 @@ class CircleAnswerAcceptView(APIView):
                 recipient_id=str(answer.author_id),
                 verb=Notification.Verb.CIRCLE_ANSWER_ACCEPTED,
                 actor_id=str(request.user.id),
-                target_id=str(question.id),
+                target_id=str(circle.id),  # see CIRCLE_QUESTION_ANSWERED note above
             )
         return Response(CircleAnswerSerializer(answer).data)
 
@@ -361,7 +366,11 @@ class CircleEventListCreateView(generics.ListCreateAPIView):
                 recipient_id=str(member.id),
                 verb=Notification.Verb.CIRCLE_EVENT_CREATED,
                 actor_id=str(request.user.id),
-                target_id=str(event.id),
+                # circle.id — there's no single-event detail route in the
+                # frontend, only /circles/<circle>/events (the list) — see
+                # CIRCLE_QUESTION_ANSWERED note above for why target_id isn't
+                # the event's own id.
+                target_id=str(circle.id),
             )
         out = CircleEventSerializer(event, context={'request': request})
         return Response(out.data, status=status.HTTP_201_CREATED)
