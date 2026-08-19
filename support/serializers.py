@@ -3,6 +3,8 @@ from rest_framework import serializers
 from communities.models import Community
 from circles.models import Circle
 
+from .models import SupportTicket
+
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
@@ -40,7 +42,7 @@ class SupportCommunitySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Community
-        fields = ['id', 'name', 'description', 'icon', 'is_public', 'created_at', 'member_count']
+        fields = ['id', 'name', 'description', 'icon', 'is_public', 'is_on_hold', 'created_at', 'member_count']
         read_only_fields = fields
 
 
@@ -78,3 +80,17 @@ class SupportCircleMemberSerializer(serializers.Serializer):
     is_active = serializers.BooleanField(source='user.is_active')
     role = serializers.CharField()
     joined_at = serializers.DateTimeField()
+
+
+class SupportTicketSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SupportTicket
+        fields = ['id', 'username', 'email', 'message', 'status', 'created_at', 'resolved_at']
+        read_only_fields = ['id', 'status', 'created_at', 'resolved_at']
+
+    def validate(self, attrs):
+        if not attrs.get('username') and not attrs.get('email'):
+            raise serializers.ValidationError('Please include a username or an email so support can reach you back.')
+        if not attrs.get('message', '').strip():
+            raise serializers.ValidationError({'message': 'Please describe what you need help with.'})
+        return attrs

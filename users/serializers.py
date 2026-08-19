@@ -1,8 +1,35 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 User = get_user_model()
+
+
+class BlockAwareTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    SimpleJWT's default login flow calls Django's authenticate(), whose
+    ModelBackend silently returns None for is_active=False users — so a
+    blocked account (see support/views.py SupportUserToggleActiveView)
+    gets the exact same generic "No active account found with the given
+    credentials" as a wrong password. That reads as "user not found" to
+    someone whose account support just blocked, which is confusing and
+    doesn't tell them what to do next.
+
+    This checks for that specific case first — correct password, but
+    is_active=False — before falling through to the normal flow, so a
+    blocked user gets a clear, actionable message instead.
+    """
+
+    def validate(self, attrs):
+        email = attrs.get(self.username_field)
+        password = attrs.get('password')
+        if email and password:
+            candidate = User.objects.filter(email__iexact=email).first()
+            if candidate and not candidate.is_active and candidate.check_password(password):
+                raise AuthenticationFailed('Your account has been blocked. Please contact support for help.')
+        return super().validate(attrs)
 
 
 class UserSerializer(serializers.ModelSerializer):

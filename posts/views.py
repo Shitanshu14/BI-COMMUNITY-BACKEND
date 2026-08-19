@@ -33,6 +33,22 @@ def blocked_user_ids(user):
     return set(blocked) | set(blocked_by)
 
 
+def ensure_not_on_hold(community):
+    """
+    Raises if `community` is currently on hold (see Community.is_on_hold
+    docstring). Called from every write path that touches a community's
+    content — new posts, comments, and likes — so "on hold" actually means
+    something instead of just blocking the compose button in one place
+    while an API client (or a stale cached page) could still slip a
+    request through.
+    """
+    if community and community.is_on_hold:
+        raise PermissionDenied(
+            'This community is on hold right now — no new posts, comments, or likes. '
+            'You can still stay in the community; it\'ll reopen once support lifts the hold.'
+        )
+
+
 class PostViewSet(viewsets.ModelViewSet):
     """
     /api/posts/?community=<id>   -> feed for a community
@@ -138,11 +154,13 @@ class PostViewSet(viewsets.ModelViewSet):
         community = serializer.validated_data.get('community')
         if community and not Membership.objects.filter(user=self.request.user, community=community).exists():
             raise PermissionDenied('Join this community before posting in it.')
+        ensure_not_on_hold(community)
         serializer.save(author=self.request.user)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):
         post = self.get_object()
+        ensure_not_on_hold(post.community)
         if post.likes.filter(id=request.user.id).exists():
             post.likes.remove(request.user)
             liked = False
@@ -274,6 +292,7 @@ class PostViewSet(viewsets.ModelViewSet):
 
         serializer = CommentSerializer(data=request.data, context={'request': request, 'post': post, 'blocked_ids': hidden_ids})
         serializer.is_valid(raise_exception=True)
+        ensure_not_on_hold(post.community)
         comment = serializer.save(author=request.user, post=post)
 
         # A reply notifies the parent comment's author; a top-level comment
@@ -309,6 +328,7 @@ class PostViewSet(viewsets.ModelViewSet):
         comment = post.comments.filter(id=comment_id).first()
         if not comment:
             return Response({'detail': 'Comment not found on this post.'}, status=404)
+        ensure_not_on_hold(post.community)
 
         if comment.likes.filter(id=request.user.id).exists():
             comment.likes.remove(request.user)

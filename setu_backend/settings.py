@@ -194,6 +194,9 @@ REST_FRAMEWORK = {
         'register': '5/min',
         'password_reset': '3/min',
         'email_verify': '5/min',
+        # Public, unauthenticated form (blocked/logged-out users need it) —
+        # tight limit so it can't be used to spam the support queue.
+        'support_ticket': '3/min',
     },
     'EXCEPTION_HANDLER': 'setu_backend.exception_handler.logging_exception_handler',
 }

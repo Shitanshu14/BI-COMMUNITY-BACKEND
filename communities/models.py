@@ -17,6 +17,15 @@ class Community(models.Model):
     rules = models.TextField(blank=True, help_text='One rule per line')
     is_public = models.BooleanField(default=True)
 
+    # When true, the community is read-only: no new posts, comments, or
+    # likes (see posts/views.py's `_check_not_on_hold` for enforcement).
+    # Existing content stays fully visible — members can still browse and
+    # stay in the community, they just can't post while support has this
+    # flagged (e.g. investigating a spam wave, a dispute, before shutting
+    # the community down entirely). Toggled from the support dashboard,
+    # never by community members themselves.
+    is_on_hold = models.BooleanField(default=False)
+
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='communities_created'
     )

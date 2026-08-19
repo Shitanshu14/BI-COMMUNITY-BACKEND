@@ -14,7 +14,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import Block
 from .serializers import (
-    RegisterSerializer, UserSerializer, UserProfileSerializer,
+    RegisterSerializer, UserSerializer, UserProfileSerializer, BlockAwareTokenObtainPairSerializer,
     PasswordResetRequestSerializer, PasswordResetConfirmSerializer,
 )
 from .tasks import send_verification_email, send_password_reset_email, email_verification_token
@@ -90,6 +90,7 @@ class RegisterView(generics.CreateAPIView):
 
 class CookieTokenObtainPairView(TokenObtainPairView):
     """POST /api/users/login/ — email+password -> httpOnly cookies (or JSON for mobile)."""
+    serializer_class = BlockAwareTokenObtainPairSerializer
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'login'
 

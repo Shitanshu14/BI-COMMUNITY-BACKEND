@@ -29,9 +29,9 @@ class CommunitySerializer(serializers.ModelSerializer):
         model = Community
         fields = [
             'id', 'name', 'slug', 'description', 'icon', 'rules',
-            'is_public', 'member_count', 'is_member', 'created_at',
+            'is_public', 'is_on_hold', 'member_count', 'is_member', 'created_at',
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'is_on_hold']
 
     def validate(self, attrs):
         # Auto-derive the slug from the name when the caller didn't supply
