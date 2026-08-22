@@ -101,6 +101,30 @@ class Post(models.Model):
         return self.comments.count()
 
 
+class PostImage(models.Model):
+    """One image in a post's gallery. A post can carry several of these
+    (the composer's multi-image picker) and the feed renders them as a
+    swipeable slider — see PostExtras/PostImageSlider on the frontend.
+    `Post.image` (single, legacy) is kept for posts created before this
+    model existed; new uploads always go through here instead."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='images')
+    image = models.ImageField(upload_to='post_images/')
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ['order', 'id']
+
+    def __str__(self):
+        return f'Image {self.order} for {self.post_id}'
+
+    def save(self, *args, **kwargs):
+        if self.image and not self.image._committed:
+            compress_uploaded_image(self.image)
+        super().save(*args, **kwargs)
+
+
 class Comment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     post = models.ForeignKey(Post, on_delete=models.CASCADE, related_name='comments')

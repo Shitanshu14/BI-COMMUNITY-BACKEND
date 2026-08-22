@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from users.serializers import UserSerializer
-from .models import Post, Comment, PollOption
+from .models import Post, Comment, PollOption, PostImage
 
 
 class CommentSerializer(serializers.ModelSerializer):
@@ -77,8 +77,21 @@ class PollOptionSerializer(serializers.ModelSerializer):
         return obj.vote_count
 
 
+class PostImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PostImage
+        fields = ['id', 'image', 'order']
+        read_only_fields = fields
+
+
 class PostSerializer(serializers.ModelSerializer):
     author = UserSerializer(read_only=True)
+    # Gallery images (0-6, uploaded via repeated `images` multipart fields —
+    # same pattern as `links`/`tags`/`options` below). `image` (singular)
+    # stays for backward compatibility with posts created before the
+    # gallery existed; new uploads always go through `images` instead, and
+    # the frontend renders `images` when present, falling back to `image`.
+    images = PostImageSerializer(many=True, read_only=True)
     like_count = serializers.SerializerMethodField()
     comment_count = serializers.SerializerMethodField()
     is_liked = serializers.SerializerMethodField()
@@ -129,7 +142,7 @@ class PostSerializer(serializers.ModelSerializer):
     class Meta:
         model = Post
         fields = [
-            'id', 'community', 'community_name', 'author', 'post_type', 'title', 'body', 'image', 'tags', 'links',
+            'id', 'community', 'community_name', 'author', 'post_type', 'title', 'body', 'image', 'images', 'tags', 'links',
             'like_count', 'comment_count', 'is_liked', 'is_saved', 'is_pinned',
             'poll_options', 'options', 'voted_option_id',
             'is_solved', 'solved_at',

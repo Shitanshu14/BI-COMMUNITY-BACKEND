@@ -11,7 +11,7 @@ from communities.models import Membership
 from notifications.models import Notification
 from notifications.tasks import notify
 from users.models import Block
-from .models import Post, PollVote, SavedPost
+from .models import Post, PollVote, SavedPost, PostImage
 from .serializers import PostSerializer, CommentSerializer
 
 
@@ -71,7 +71,7 @@ class PostViewSet(viewsets.ModelViewSet):
     # Base queryset stays select_related-only here; the heavier annotations
     # (Count, Exists) are applied per-request in get_queryset() below, since
     # is_liked_val depends on the requesting user.
-    queryset = Post.objects.select_related('author', 'community').prefetch_related('poll_options__votes')
+    queryset = Post.objects.select_related('author', 'community').prefetch_related('poll_options__votes', 'images')
     serializer_class = PostSerializer
     permission_classes = [permissions.IsAuthenticated, IsAuthorOrReadOnly]
 
@@ -155,7 +155,17 @@ class PostViewSet(viewsets.ModelViewSet):
         if community and not Membership.objects.filter(user=self.request.user, community=community).exists():
             raise PermissionDenied('Join this community before posting in it.')
         ensure_not_on_hold(community)
-        serializer.save(author=self.request.user)
+        post = serializer.save(author=self.request.user)
+        # Gallery images: the composer sends these as repeated `images`
+        # multipart fields (same convention as `links`/`tags`), separate
+        # from the legacy single `image` field which the serializer already
+        # handled above. Capped at 6 per post to match the composer's UI.
+        files = self.request.FILES.getlist('images')[:6]
+        if files:
+            # Individual .save() calls (not bulk_create) so PostImage.save()'s
+            # compress_uploaded_image hook actually runs per image.
+            for i, f in enumerate(files):
+                PostImage.objects.create(post=post, image=f, order=i)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):
