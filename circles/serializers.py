@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from users.serializers import UserSerializer
-from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer, CircleEvent, CircleEventRSVP
+from .models import Circle, CircleMembership, CircleInvite, CircleQuestion, CircleAnswer, CircleEvent
 
 
 class CircleSerializer(serializers.ModelSerializer):

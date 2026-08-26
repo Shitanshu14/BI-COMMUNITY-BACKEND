@@ -40,7 +40,19 @@ class CommunityViewSet(viewsets.ModelViewSet):
     # which meant DRF fired one extra COUNT query PER community on every
     # list request (classic N+1 — 100 communities = 101 queries). Annotating
     # it here does the whole thing in a single query regardless of list size.
-    queryset = Community.objects.annotate(member_count_val=Count('members', distinct=True))
+    #
+    # The explicit .order_by() matters: Community.Meta already sets
+    # ordering=['-created_at'], but annotating an aggregate (Count) forces
+    # a GROUP BY, and Django doesn't reliably carry a model's default
+    # ordering through that — .ordered comes back False and Django logs
+    # "UnorderedObjectListWarning: pagination may yield inconsistent
+    # results". In practice that meant page 2 of the community list could
+    # repeat or skip communities from page 1 depending on the DB's whim.
+    # Being explicit here fixes it for good regardless of what future
+    # annotations get added.
+    queryset = Community.objects.annotate(
+        member_count_val=Count('members', distinct=True)
+    ).order_by('-created_at')
     serializer_class = CommunitySerializer
     permission_classes = [IsAdminOrReadOnly]
     filter_backends = [filters.SearchFilter]

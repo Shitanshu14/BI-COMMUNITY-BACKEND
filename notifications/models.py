@@ -27,6 +27,7 @@ class Notification(models.Model):
         CIRCLE_QUESTION_ANSWERED = 'circle_question_answered', 'answered your question'
         CIRCLE_ANSWER_ACCEPTED = 'circle_answer_accepted', 'accepted your answer'
         CIRCLE_EVENT_CREATED = 'circle_event_created', 'scheduled an event in a circle'
+        ANSWER_ACCEPTED = 'answer_accepted', 'accepted your answer'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     recipient = models.ForeignKey(

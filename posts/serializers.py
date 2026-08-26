@@ -18,8 +18,8 @@ class CommentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Comment
-        fields = ['id', 'post', 'author', 'body', 'parent', 'replies', 'like_count', 'is_liked', 'created_at']
-        read_only_fields = ['id', 'post', 'author', 'created_at']
+        fields = ['id', 'post', 'author', 'body', 'parent', 'replies', 'like_count', 'is_liked', 'is_accepted', 'created_at']
+        read_only_fields = ['id', 'post', 'author', 'created_at', 'is_accepted']
 
     def get_replies(self, obj):
         # `children_map` (built once by the view — see PostViewSet.comments)

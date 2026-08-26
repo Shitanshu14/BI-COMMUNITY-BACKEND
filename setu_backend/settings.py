@@ -152,14 +152,63 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-STORAGES = {
-    'default': {
-        'BACKEND': 'django.core.files.storage.FileSystemStorage',
-    },
-    'staticfiles': {
-        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
-    },
-}
+# BUG FIX: uploaded images (post photos, community/circle icons, avatars)
+# were vanishing after ~a day in production. Root cause: USE_S3 further
+# down this file only ever set the legacy `DEFAULT_FILE_STORAGE` variable —
+# but Django 4.2+ (we're on 6.0) reads file-storage config from the
+# `STORAGES` dict below instead, and `STORAGES['default']` was hardcoded to
+# `FileSystemStorage` unconditionally. So even with USE_S3=True and real AWS
+# keys set on Render, every upload was STILL being written to local disk —
+# and Render's web dyno filesystem is ephemeral, wiped clean on every
+# restart/redeploy (which free/starter instances do routinely, e.g. after a
+# period of inactivity). The file was never actually lost from S3 — it was
+# never being sent there in the first place.
+#
+# Fix: read USE_S3 here (before STORAGES is built) and, when true, point
+# `STORAGES['default']` itself at S3Boto3Storage. python-decouple's config()
+# is safe to call more than once, so this doesn't conflict with anything
+# below.
+USE_S3 = config('USE_S3', default=False, cast=bool)
+
+if USE_S3:
+    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
+    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
+    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='')
+    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='ap-south-1')
+    # Custom domain (e.g. a CloudFront distribution) — optional; falls back
+    # to the standard bucket.s3.amazonaws.com URL when unset.
+    AWS_S3_CUSTOM_DOMAIN = config('AWS_S3_CUSTOM_DOMAIN', default='')
+    # Modern S3 buckets have ACLs disabled by default (Object Ownership =
+    # "Bucket owner enforced") — passing an ACL on upload then 400s every
+    # single write. None tells django-storages to not send one at all;
+    # the bucket's own policy is what makes objects public instead.
+    AWS_DEFAULT_ACL = None
+    # Plain public URLs (no expiring auth query string) — these are post
+    # images/avatars meant to be publicly viewable, not signed/private
+    # downloads, and a querystring URL would eventually 403 once it expires.
+    AWS_QUERYSTRING_AUTH = False
+    # Don't silently overwrite a same-named file from a different upload —
+    # django-storages appends a short random suffix instead when this is
+    # False, same behavior FileSystemStorage already had locally.
+    AWS_S3_FILE_OVERWRITE = False
+
+    STORAGES = {
+        'default': {
+            'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+        },
+        'staticfiles': {
+            'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+        },
+    }
+else:
+    STORAGES = {
+        'default': {
+            'BACKEND': 'django.core.files.storage.FileSystemStorage',
+        },
+        'staticfiles': {
+            'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+        },
+    }
 
 # Safety net: don't 500 the whole page if a static file is missing from the
 # collectstatic manifest (e.g. build command didn't run collectstatic yet) —
@@ -286,17 +335,6 @@ CELERY_TIMEZONE = TIME_ZONE
 # nobody is consuming. Production always runs a real worker (see
 # render.yaml) so this stays False there.
 CELERY_TASK_ALWAYS_EAGER = config('CELERY_TASK_ALWAYS_EAGER', default=DEBUG, cast=bool)
-
-# --------------------------------------------------------------------
-# FILE STORAGE (S3 / Supabase Storage) — wired later when keys are ready
-# --------------------------------------------------------------------
-USE_S3 = config('USE_S3', default=False, cast=bool)
-if USE_S3:
-    AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID', default='')
-    AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY', default='')
-    AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME', default='')
-    AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME', default='ap-south-1')
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 # --------------------------------------------------------------------
 # ERROR TRACKING (Sentry) — only turns on if SENTRY_DSN is set, so local

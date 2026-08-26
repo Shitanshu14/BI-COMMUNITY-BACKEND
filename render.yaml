@@ -78,6 +78,23 @@ services:
         sync: false
       - key: DB_PORT
         value: "5432"
+      # ------------------------------------------------------------
+      # File storage — WITHOUT this, uploaded post/community/circle images
+      # are written to this same ephemeral disk (see the DB comment right
+      # above) and vanish the next time the service restarts/redeploys —
+      # exactly the "image was there yesterday, gone today" symptom. Set
+      # USE_S3=True and fill in a real S3 bucket's credentials under the
+      # service's Environment tab for uploads to actually persist.
+      - key: USE_S3
+        value: "True"
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_STORAGE_BUCKET_NAME
+        sync: false
+      - key: AWS_S3_REGION_NAME
+        value: "ap-south-1"
 
   # ------------------------------------------------------------------
   # Celery worker — actually processes the jobs queued by `.delay(...)`

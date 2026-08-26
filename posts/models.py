@@ -145,10 +145,16 @@ class Comment(models.Model):
         settings.AUTH_USER_MODEL, related_name='liked_comments', blank=True
     )
 
+    # QUESTION-type posts only: the asker can mark one comment as the
+    # accepted answer (mirrors CircleAnswer.is_accepted). Only ever one
+    # accepted comment per post — see PostViewSet.accept_comment, which
+    # clears any previous accepted comment before setting the new one.
+    is_accepted = models.BooleanField(default=False)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['created_at']
+        ordering = ['-is_accepted', 'created_at']
 
     def __str__(self):
         return f'Comment by {self.author} on {self.post}'

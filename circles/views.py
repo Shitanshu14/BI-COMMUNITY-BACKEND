@@ -60,9 +60,13 @@ class CircleViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
+        # .order_by() is explicit here for the same reason as
+        # CommunityViewSet.queryset: annotating a Count() forces a GROUP BY
+        # that Django doesn't reliably carry the model's default ordering
+        # through, which breaks pagination consistency on the circle list.
         qs = Circle.objects.filter(members=user).annotate(
             member_count_val=Count('members', distinct=True),
-        )
+        ).order_by('-created_at')
         if user.is_authenticated:
             qs = qs.annotate(
                 is_member_val=Exists(

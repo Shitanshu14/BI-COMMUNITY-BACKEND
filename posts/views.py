@@ -61,6 +61,7 @@ class PostViewSet(viewsets.ModelViewSet):
     /api/posts/<id>/comments/    -> GET list / POST create comment (nested replies via `parent`)
     /api/posts/<id>/pin/         -> POST toggle pinned (community admin/moderator only)
     /api/posts/<id>/mark_solved/ -> POST one-way solve for a QUESTION post (author only)
+    /api/posts/<id>/comments/<comment_id>/accept/ -> POST mark one comment as the accepted answer (author only)
     """
 
     # How far back "trending" looks. Without this window an old post that
@@ -281,7 +282,7 @@ class PostViewSet(viewsets.ModelViewSet):
             # just to render one page. children_map turns the recursive
             # CommentSerializer.get_replies into a dict lookup instead.
             all_comments = list(
-                post.comments.select_related('author').prefetch_related('likes').order_by('created_at')
+                post.comments.select_related('author').prefetch_related('likes').order_by('-is_accepted', 'created_at')
             )
             if hidden_ids:
                 all_comments = [c for c in all_comments if c.author_id not in hidden_ids]
@@ -354,3 +355,43 @@ class PostViewSet(viewsets.ModelViewSet):
                     target_id=str(post.id),
                 )
         return Response({'liked': liked, 'like_count': comment.like_count})
+
+    @action(
+        detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated],
+        url_path='comments/(?P<comment_id>[^/.]+)/accept',
+    )
+    def accept_comment(self, request, pk=None, comment_id=None):
+        """POST /api/posts/<post_id>/comments/<comment_id>/accept/ — the
+        asker marks one comment as the accepted answer on their own
+        QUESTION post. Mirrors CircleAnswerAcceptView: only the post's own
+        author may accept (no circle-owner equivalent here — a community
+        has no single owner), accepting also flips the post to solved, and
+        only one comment can be accepted at a time (accepting a new one
+        clears any previous pick)."""
+        post = self.get_object()
+        if post.post_type != Post.PostType.QUESTION:
+            return Response({'detail': 'Only questions can have an accepted answer.'}, status=400)
+        if post.author_id != request.user.id:
+            raise PermissionDenied('Only the person who asked can accept an answer.')
+
+        comment = post.comments.filter(id=comment_id).first()
+        if not comment:
+            return Response({'detail': 'Comment not found on this post.'}, status=404)
+
+        post.comments.filter(is_accepted=True).update(is_accepted=False)
+        comment.is_accepted = True
+        comment.save(update_fields=['is_accepted'])
+
+        if not post.is_solved:
+            post.is_solved = True
+            post.solved_at = timezone.now()
+            post.save(update_fields=['is_solved', 'solved_at'])
+
+        if comment.author_id != request.user.id:
+            notify(
+                recipient_id=str(comment.author_id),
+                verb=Notification.Verb.ANSWER_ACCEPTED,
+                actor_id=str(request.user.id),
+                target_id=str(post.id),
+            )
+        return Response(CommentSerializer(comment, context={'request': request}).data)
