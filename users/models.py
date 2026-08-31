@@ -48,6 +48,9 @@ class User(AbstractUser):
     # until the person approves it (see follows app).
     is_private = models.BooleanField(default=False)
 
+    date_of_birth = models.DateField(null=True, blank=True)
+    description = models.TextField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -64,6 +67,24 @@ class User(AbstractUser):
         if self.avatar and not self.avatar._committed:
             compress_uploaded_image(self.avatar, max_dimension=400, quality=85)
         super().save(*args, **kwargs)
+
+
+class PasswordHistory(models.Model):
+    """
+    Stores previous password hashes for users to prevent reuse of the last 3 passwords.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='password_history'
+    )
+    password_hash = models.CharField(max_length=128)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Password history for {self.user.email} at {self.created_at}'
 
 
 class Block(models.Model):

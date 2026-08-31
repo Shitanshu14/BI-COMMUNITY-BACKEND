@@ -23,10 +23,11 @@ class BlockAwareTokenObtainPairSerializer(TokenObtainPairSerializer):
     """
 
     def validate(self, attrs):
-        email = attrs.get(self.username_field)
+        login_input = attrs.get(self.username_field)
         password = attrs.get('password')
-        if email and password:
-            candidate = User.objects.filter(email__iexact=email).first()
+        if login_input and password:
+            from django.db.models import Q
+            candidate = User.objects.filter(Q(email__iexact=login_input) | Q(username__iexact=login_input)).first()
             if candidate and not candidate.is_active and candidate.check_password(password):
                 raise AuthenticationFailed('Your account has been blocked. Please contact support for help.')
         return super().validate(attrs)
@@ -45,6 +46,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'email', 'role', 'headline', 'bio',
             'avatar', 'is_verified', 'email_confirmed', 'is_private', 'reputation_points', 'created_at',
+            'first_name', 'last_name', 'date_of_birth', 'description',
         ]
         read_only_fields = ['id', 'is_verified', 'email_confirmed', 'reputation_points', 'created_at']
 
@@ -133,24 +135,65 @@ class UserProfileSerializer(UserSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
-    # AbstractUser's default username max_length (150) is far looser than
-    # what actually makes sense for a display handle in this app — cap it
-    # here rather than loosening every card/sidebar layout to cope with a
-    # 150-char username.
     username = serializers.CharField(min_length=3, max_length=20)
+    first_name = serializers.CharField(required=True, max_length=16)
+    last_name = serializers.CharField(required=True, max_length=16)
+    date_of_birth = serializers.DateField(required=True)
+    description = serializers.CharField(required=False, allow_blank=True, default='')
+    bio = serializers.CharField(required=False, allow_blank=True, default='', max_length=280)
+    avatar = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'password', 'role', 'headline']
+        fields = [
+            'id', 'username', 'email', 'password', 'role', 'headline',
+            'first_name', 'last_name', 'date_of_birth', 'description', 'bio', 'avatar'
+        ]
+
+    def validate_first_name(self, value):
+        import re
+        if not re.match(r'^[A-Za-z ]+$', value):
+            raise serializers.ValidationError("First name must contain letters only.")
+        return value
+
+    def validate_last_name(self, value):
+        import re
+        if not re.match(r'^[A-Za-z ]+$', value):
+            raise serializers.ValidationError("Last name must contain letters only.")
+        return value
+
+    def validate(self, attrs):
+        role = attrs.get('role', User.Role.STUDENT)
+        dob = attrs.get('date_of_birth')
+        if dob:
+            from datetime import date
+            today = date.today()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            if role == User.Role.STUDENT:
+                if age >= 18:
+                    raise serializers.ValidationError({"date_of_birth": "Students must be under 18 years old."})
+            else:
+                if age < 18:
+                    raise serializers.ValidationError({"date_of_birth": "Non-students must be 18 years old or older."})
+        return attrs
 
     def create(self, validated_data):
-        return User.objects.create_user(
+        user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
             password=validated_data['password'],
             role=validated_data.get('role', User.Role.STUDENT),
             headline=validated_data.get('headline', ''),
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
+            date_of_birth=validated_data.get('date_of_birth'),
+            bio=validated_data.get('bio', ''),
+            description=validated_data.get('description', ''),
+            avatar=validated_data.get('avatar'),
         )
+        from .models import PasswordHistory
+        PasswordHistory.objects.create(user=user, password_hash=user.password)
+        return user
 
 
 class PasswordResetRequestSerializer(serializers.Serializer):
@@ -161,3 +204,36 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     uid = serializers.CharField()
     token = serializers.CharField()
     new_password = serializers.CharField(write_only=True, validators=[validate_password])
+
+    def validate(self, attrs):
+        from django.utils.encoding import force_str
+        from django.utils.http import urlsafe_base64_decode
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.hashers import check_password
+        
+        uid = attrs.get('uid')
+        new_password = attrs.get('new_password')
+        User = get_user_model()
+        
+        try:
+            user_id = force_str(urlsafe_base64_decode(uid))
+            user = User.objects.get(pk=user_id)
+        except (User.DoesNotExist, ValueError, TypeError, OverflowError):
+            raise serializers.ValidationError("Invalid or expired password reset link.")
+            
+        from django.contrib.auth.tokens import default_token_generator
+        token = attrs.get('token')
+        if not default_token_generator.check_token(user, token):
+            raise serializers.ValidationError("Invalid or expired password reset link.")
+
+        # Check against password history
+        histories = user.password_history.all()[:3]
+        for history in histories:
+            if check_password(new_password, history.password_hash):
+                raise serializers.ValidationError({"new_password": "You cannot reuse any of your last 3 passwords."})
+                
+        # Also check current password just in case it's not in the history yet
+        if check_password(new_password, user.password):
+            raise serializers.ValidationError({"new_password": "You cannot reuse your current password."})
+
+        return attrs

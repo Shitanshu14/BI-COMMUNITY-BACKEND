@@ -246,8 +246,17 @@ class DeactivateAccountView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        username = request.data.get('username')
         password = request.data.get('password')
-        if not password or not request.user.check_password(password):
+        
+        if not username or not password:
+            return Response({'detail': 'Username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        user = request.user
+        if username.lower() not in [user.username.lower(), user.email.lower()]:
+            return Response({'detail': 'Incorrect username.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.check_password(password):
             return Response({'detail': 'Incorrect password.'}, status=status.HTTP_400_BAD_REQUEST)
 
         request.user.is_active = False
@@ -352,4 +361,9 @@ class PasswordResetConfirmView(APIView):
 
         user.set_password(new_password)
         user.save(update_fields=['password'])
+
+        # Save the new password to PasswordHistory
+        from users.models import PasswordHistory
+        PasswordHistory.objects.create(user=user, password_hash=user.password)
+
         return Response({'status': 'Password updated. You can log in now.'})
