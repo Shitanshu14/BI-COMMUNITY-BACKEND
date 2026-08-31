@@ -3,7 +3,8 @@ from django.conf import settings
 from django.db import models
 
 from communities.models import Community
-from circles.models import Circle
+from circles.models import Circle, CircleQuestion
+from posts.models import Post
 
 
 class Message(models.Model):
@@ -28,6 +29,28 @@ class Message(models.Model):
     )
     sender = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='chat_messages')
     body = models.TextField()
+
+    # Sharing a community post, a circle Q&A question, or an invite to
+    # join a community/circle straight into a chat message — WhatsApp's
+    # "forward", but for in-app objects instead of a file. At most one of
+    # these four is ever set on a given message. All use SET_NULL rather
+    # than CASCADE: if the shared post/question/community/circle is later
+    # deleted, the message itself should keep existing (just render as
+    # "this content was removed") instead of the whole conversation
+    # losing that message.
+    shared_post = models.ForeignKey(
+        Post, on_delete=models.SET_NULL, null=True, blank=True, related_name='shared_in_messages'
+    )
+    shared_question = models.ForeignKey(
+        CircleQuestion, on_delete=models.SET_NULL, null=True, blank=True, related_name='shared_in_messages'
+    )
+    shared_community = models.ForeignKey(
+        Community, on_delete=models.SET_NULL, null=True, blank=True, related_name='shared_in_messages'
+    )
+    shared_circle = models.ForeignKey(
+        Circle, on_delete=models.SET_NULL, null=True, blank=True, related_name='shared_in_messages'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
 
