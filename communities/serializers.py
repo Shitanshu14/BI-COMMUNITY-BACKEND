@@ -7,6 +7,7 @@ from .models import Community, Membership
 class CommunitySerializer(serializers.ModelSerializer):
     member_count = serializers.SerializerMethodField()
     is_member = serializers.SerializerMethodField()
+    is_pending = serializers.SerializerMethodField()
     # BUG FIX: `slug` is a required, unique SlugField on the model. The
     # Django Admin form auto-fills it via `prepopulated_fields`, but any
     # other client hitting POST /api/communities/ directly (a future admin
@@ -29,7 +30,8 @@ class CommunitySerializer(serializers.ModelSerializer):
         model = Community
         fields = [
             'id', 'name', 'slug', 'description', 'icon', 'rules',
-            'is_public', 'is_on_hold', 'member_count', 'is_member', 'created_at',
+            'is_public', 'join_mode', 'is_on_hold', 'member_count',
+            'is_member', 'is_pending', 'created_at',
         ]
         read_only_fields = ['id', 'created_at', 'is_on_hold']
 
@@ -57,4 +59,16 @@ class CommunitySerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             return False
-        return Membership.objects.filter(user=request.user, community=obj).exists()
+        return Membership.objects.filter(
+            user=request.user, community=obj, status=Membership.Status.APPROVED
+        ).exists()
+
+    def get_is_pending(self, obj):
+        if hasattr(obj, 'is_pending_val'):
+            return obj.is_pending_val
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return False
+        return Membership.objects.filter(
+            user=request.user, community=obj, status=Membership.Status.PENDING
+        ).exists()

@@ -35,7 +35,9 @@ class MessageHistoryView(generics.ListAPIView):
         community_id = self.kwargs['community_id']
         # Same rule as the WebSocket: only members can read chat history for
         # a community — this endpoint had no such check before.
-        if not Membership.objects.filter(user=self.request.user, community_id=community_id).exists():
+        if not Membership.objects.filter(
+            user=self.request.user, community_id=community_id, status=Membership.Status.APPROVED
+        ).exists():
             raise PermissionDenied('Join this community to view its chat.')
         return Message.objects.filter(community_id=community_id).select_related('sender').order_by('-created_at')[:50]
 
@@ -281,7 +283,9 @@ class CommunityChatShareView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, community_id):
-        if not Membership.objects.filter(user=request.user, community_id=community_id).exists():
+        if not Membership.objects.filter(
+            user=request.user, community_id=community_id, status=Membership.Status.APPROVED
+        ).exists():
             raise PermissionDenied('Join this community to chat here.')
 
         field, obj = _resolve_share_target(request.data.get('share_type'), request.data.get('share_id'))

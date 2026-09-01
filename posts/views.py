@@ -49,6 +49,23 @@ def ensure_not_on_hold(community):
         )
 
 
+def require_membership(user, community):
+    """
+    Raises PermissionDenied unless `user` is an approved member of
+    `community`. Reading a public community's feed never needed
+    membership (see get_queryset's is_public check) — but *acting* on a
+    post always does, public or private: liking, saving, voting,
+    commenting, and reacting to comments all require having actually
+    joined first. A private community stays fully locked to non-members
+    for reading too (get_queryset already returns nothing for them, so
+    they can never even reach these actions via a real post id).
+    """
+    if community and not Membership.objects.filter(
+        user=user, community=community, status=Membership.Status.APPROVED
+    ).exists():
+        raise PermissionDenied('Join this community first — then you can like, comment, and share here.')
+
+
 class PostViewSet(viewsets.ModelViewSet):
     """
     /api/posts/?community=<id>   -> feed for a community
@@ -94,7 +111,9 @@ class PostViewSet(viewsets.ModelViewSet):
         # annotations further down.
         qs = qs.filter(
             Q(community__is_public=True) |
-            Exists(Membership.objects.filter(community_id=OuterRef('community_id'), user_id=user.id))
+            Exists(Membership.objects.filter(
+                community_id=OuterRef('community_id'), user_id=user.id, status=Membership.Status.APPROVED
+            ))
         )
 
         community_id = self.request.query_params.get('community')
@@ -153,7 +172,9 @@ class PostViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         community = serializer.validated_data.get('community')
-        if community and not Membership.objects.filter(user=self.request.user, community=community).exists():
+        if community and not Membership.objects.filter(
+            user=self.request.user, community=community, status=Membership.Status.APPROVED
+        ).exists():
             raise PermissionDenied('Join this community before posting in it.')
         ensure_not_on_hold(community)
         post = serializer.save(author=self.request.user)
@@ -171,6 +192,7 @@ class PostViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
     def like(self, request, pk=None):
         post = self.get_object()
+        require_membership(request.user, post.community)
         ensure_not_on_hold(post.community)
         if post.likes.filter(id=request.user.id).exists():
             post.likes.remove(request.user)
@@ -195,6 +217,7 @@ class PostViewSet(viewsets.ModelViewSet):
         DRF-internal `.save`-adjacent machinery on the serializer, not the
         view — this avoids any confusion reading the two side by side.)"""
         post = self.get_object()
+        require_membership(request.user, post.community)
         saved_qs = SavedPost.objects.filter(post=post, user=request.user)
         if saved_qs.exists():
             saved_qs.delete()
@@ -209,7 +232,9 @@ class PostViewSet(viewsets.ModelViewSet):
         """POST /api/posts/<id>/pin/ — toggles is_pinned. Only a moderator/
         admin of the post's community (or Django staff) may pin/unpin."""
         post = self.get_object()
-        membership = Membership.objects.filter(user=request.user, community=post.community).first()
+        membership = Membership.objects.filter(
+            user=request.user, community=post.community, status=Membership.Status.APPROVED
+        ).first()
         is_mod = membership is not None and membership.role in (Membership.Role.ADMIN, Membership.Role.MODERATOR)
         if not (is_mod or request.user.is_staff):
             raise PermissionDenied('Only a community admin or moderator can pin posts.')
@@ -245,6 +270,7 @@ class PostViewSet(viewsets.ModelViewSet):
         """POST /api/posts/<id>/vote/  body: {option_id} — one vote per user;
         voting for a different option moves the existing vote."""
         post = self.get_object()
+        require_membership(request.user, post.community)
         if post.post_type != Post.PostType.POLL:
             return Response({'detail': 'This post is not a poll.'}, status=400)
 
@@ -303,6 +329,7 @@ class PostViewSet(viewsets.ModelViewSet):
 
         serializer = CommentSerializer(data=request.data, context={'request': request, 'post': post, 'blocked_ids': hidden_ids})
         serializer.is_valid(raise_exception=True)
+        require_membership(request.user, post.community)
         ensure_not_on_hold(post.community)
         comment = serializer.save(author=request.user, post=post)
 
@@ -339,6 +366,7 @@ class PostViewSet(viewsets.ModelViewSet):
         comment = post.comments.filter(id=comment_id).first()
         if not comment:
             return Response({'detail': 'Comment not found on this post.'}, status=404)
+        require_membership(request.user, post.community)
         ensure_not_on_hold(post.community)
 
         if comment.likes.filter(id=request.user.id).exists():

@@ -58,7 +58,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def is_member(self):
         from communities.models import Membership
         return Membership.objects.filter(
-            user=self.scope['user'], community_id=self.community_id
+            user=self.scope['user'], community_id=self.community_id, status=Membership.Status.APPROVED
         ).exists()
 
     @database_sync_to_async

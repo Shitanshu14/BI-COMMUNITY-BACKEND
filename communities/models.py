@@ -17,6 +17,16 @@ class Community(models.Model):
     rules = models.TextField(blank=True, help_text='One rule per line')
     is_public = models.BooleanField(default=True)
 
+    class JoinMode(models.TextChoices):
+        OPEN = 'open', 'Open — join instantly'
+        APPROVAL = 'approval', 'Registration required — an admin must approve'
+
+    # "Registration based" community creation: when APPROVAL, tapping Join
+    # doesn't grant membership right away — it creates a pending Membership
+    # (see Membership.Status below) that a community admin/moderator has to
+    # approve first. OPEN keeps the original one-tap join behaviour.
+    join_mode = models.CharField(max_length=20, choices=JoinMode.choices, default=JoinMode.OPEN)
+
     # When true, the community is read-only: no new posts, comments, or
     # likes (see posts/views.py's `_check_not_on_hold` for enforcement).
     # Existing content stays fully visible — members can still browse and
@@ -44,7 +54,14 @@ class Community(models.Model):
 
     @property
     def member_count(self):
-        return self.members.count()
+        # Only APPROVED memberships count as real members — someone with a
+        # pending registration request hasn't joined yet, so they shouldn't
+        # inflate the count or show up as "joined" anywhere.
+        return self.members_approved.count()
+
+    @property
+    def members_approved(self):
+        return self.members.filter(membership__status=Membership.Status.APPROVED)
 
 
 class Membership(models.Model):
@@ -55,13 +72,22 @@ class Membership(models.Model):
         MODERATOR = 'moderator', 'Moderator'
         ADMIN = 'admin', 'Admin'
 
+    class Status(models.TextChoices):
+        APPROVED = 'approved', 'Approved'
+        # Only used for communities with join_mode=APPROVAL — the person
+        # asked to join ("registered") but an admin hasn't approved them
+        # yet, so they aren't a real member: no private posts, no chat,
+        # not counted in member_count, not shown as "joined".
+        PENDING = 'pending', 'Pending approval'
+
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     community = models.ForeignKey(Community, on_delete=models.CASCADE)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MEMBER)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.APPROVED)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         unique_together = ('user', 'community')
 
     def __str__(self):
-        return f'{self.user} in {self.community} ({self.role})'
+        return f'{self.user} in {self.community} ({self.role}, {self.status})'
