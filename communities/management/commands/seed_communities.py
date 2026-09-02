@@ -92,32 +92,56 @@ class Command(BaseCommand):
             help="Regenerate icon/cover_image even for communities that already have one.",
         )
 
-    @transaction.atomic
     def handle(self, *args, **options):
-        created, updated, imaged = 0, 0, 0
+        # IMPORTANT: no single @transaction.atomic wrapping the whole loop.
+        # It used to — which meant if *anything* raised for *any one* item
+        # (most likely: the icon/cover .save() call hitting S3 when
+        # USE_S3=True but AWS_ACCESS_KEY_ID/SECRET/BUCKET aren't actually
+        # filled in on the host yet — those are `sync: false` in render.yaml,
+        # i.e. set manually per-environment and easy to forget), Django
+        # rolled back the *entire* transaction — every community, even ones
+        # already committed earlier in the same run — leaving zero of the
+        # ten default communities in the DB. That's the "communities I
+        # created by default aren't showing" symptom: the command was
+        # failing/rolling back silently on every deploy.
+        #
+        # Each item now gets its own small atomic block for the DB row, and
+        # the icon/cover upload is separately try/excepted: a storage
+        # failure logs a warning and moves on instead of undoing the
+        # community record. The frontend already has a graceful fallback
+        # for a missing icon/cover (a generated gradient + initial, see
+        # CommunityCover.jsx), so the community still shows up correctly —
+        # just without its custom art — until storage is fixed and
+        # `--reset-images` is re-run.
+        created, updated, imaged, image_failures = 0, 0, 0, 0
         for item in DEFAULT_COMMUNITIES:
             slug = slugify(item["name"])
-            community, was_created = Community.objects.get_or_create(
-                slug=slug,
-                defaults={
-                    "name": item["name"],
-                    "description": item["description"],
-                    "rules": item["rules"],
-                    "category": item["category"],
-                    "is_verified": item["is_verified"],
-                    "member_count_boost": item["boost"],
-                    "is_public": True,
-                },
-            )
-            if was_created:
-                created += 1
-            elif options["reset_boost"]:
-                community.description = item["description"]
-                community.category = item["category"]
-                community.is_verified = item["is_verified"]
-                community.member_count_boost = item["boost"]
-                community.save(update_fields=["description", "category", "is_verified", "member_count_boost"])
-                updated += 1
+            try:
+                with transaction.atomic():
+                    community, was_created = Community.objects.get_or_create(
+                        slug=slug,
+                        defaults={
+                            "name": item["name"],
+                            "description": item["description"],
+                            "rules": item["rules"],
+                            "category": item["category"],
+                            "is_verified": item["is_verified"],
+                            "member_count_boost": item["boost"],
+                            "is_public": True,
+                        },
+                    )
+                    if was_created:
+                        created += 1
+                    elif options["reset_boost"]:
+                        community.description = item["description"]
+                        community.category = item["category"]
+                        community.is_verified = item["is_verified"]
+                        community.member_count_boost = item["boost"]
+                        community.save(update_fields=["description", "category", "is_verified", "member_count_boost"])
+                        updated += 1
+            except Exception as exc:  # noqa: BLE001 — one bad row must never block the rest
+                self.stderr.write(self.style.ERROR(f"Skipped '{item['name']}': {exc}"))
+                continue
 
             # Backfill the generated icon + cover for any default community
             # that's missing one (freshly created ones always are), or force
@@ -125,18 +149,28 @@ class Command(BaseCommand):
             needs_icon = options["reset_images"] or not community.icon
             needs_cover = options["reset_images"] or not community.cover_image
             if needs_icon or needs_cover:
-                file_stub = slug
-                if needs_icon:
-                    icon_bytes = build_icon_png(item["color"], item["icon_key"])
-                    community.icon.save(f"{file_stub}.png", ContentFile(icon_bytes), save=False)
-                if needs_cover:
-                    cover_bytes = build_cover_png(item["color"], item["icon_key"])
-                    community.cover_image.save(f"{file_stub}_cover.png", ContentFile(cover_bytes), save=False)
-                community.save(update_fields=["icon", "cover_image"])
-                imaged += 1
+                try:
+                    file_stub = slug
+                    if needs_icon:
+                        icon_bytes = build_icon_png(item["color"], item["icon_key"])
+                        community.icon.save(f"{file_stub}.png", ContentFile(icon_bytes), save=False)
+                    if needs_cover:
+                        cover_bytes = build_cover_png(item["color"], item["icon_key"])
+                        community.cover_image.save(f"{file_stub}_cover.png", ContentFile(cover_bytes), save=False)
+                    community.save(update_fields=["icon", "cover_image"])
+                    imaged += 1
+                except Exception as exc:  # noqa: BLE001 — image/storage failure shouldn't hide the community
+                    image_failures += 1
+                    self.stderr.write(self.style.WARNING(
+                        f"'{item['name']}' created without icon/cover (image step failed: {exc}). "
+                        f"Re-run with --reset-images once storage is fixed."
+                    ))
 
-        self.stdout.write(self.style.SUCCESS(
+        summary = (
             f"Seed complete — {created} community(ies) created, {updated} updated, "
             f"{imaged} given icon/cover images, "
             f"{len(DEFAULT_COMMUNITIES) - created - updated} already up to date."
-        ))
+        )
+        if image_failures:
+            summary += f" {image_failures} community(ies) missing icon/cover — see warnings above."
+        self.stdout.write(self.style.SUCCESS(summary))
