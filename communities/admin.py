@@ -5,8 +5,11 @@ from .models import Community, Membership
 
 @admin.register(Community)
 class CommunityAdmin(admin.ModelAdmin):
-    list_display = ('name', 'slug', 'is_public', 'join_mode', 'member_count', 'created_at')
-    list_filter = ('is_public', 'join_mode')
+    list_display = (
+        'name', 'slug', 'category', 'is_verified', 'is_public', 'join_mode',
+        'member_count', 'created_at',
+    )
+    list_filter = ('category', 'is_verified', 'is_public', 'join_mode')
     prepopulated_fields = {'slug': ('name',)}
     search_fields = ('name',)
 

@@ -1,4 +1,4 @@
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Count, Exists, ExpressionWrapper, F, IntegerField, OuterRef, Q
 from rest_framework import viewsets, permissions, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -71,9 +71,16 @@ class CommunityViewSet(viewsets.ModelViewSet):
     queryset = Community.objects.annotate(
         # Only APPROVED memberships count as real members — someone with a
         # pending registration request on an approval-based community
-        # hasn't joined yet (see Membership.Status).
-        member_count_val=Count(
+        # hasn't joined yet (see Membership.Status). The vanity
+        # `member_count_boost` is added on top, same as the model property,
+        # so list/retrieve responses match what Membership-based lookups
+        # would give.
+        _approved_count=Count(
             'membership', filter=Q(membership__status=Membership.Status.APPROVED), distinct=True
+        )
+    ).annotate(
+        member_count_val=ExpressionWrapper(
+            F('_approved_count') + F('member_count_boost'), output_field=IntegerField()
         )
     ).order_by('-created_at')
     serializer_class = CommunitySerializer

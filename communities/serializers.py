@@ -29,11 +29,18 @@ class CommunitySerializer(serializers.ModelSerializer):
     class Meta:
         model = Community
         fields = [
-            'id', 'name', 'slug', 'description', 'icon', 'rules',
+            'id', 'name', 'slug', 'description', 'icon', 'cover_image',
+            'category', 'is_verified', 'rules',
             'is_public', 'join_mode', 'is_on_hold', 'member_count',
             'is_member', 'is_pending', 'created_at',
         ]
-        read_only_fields = ['id', 'created_at', 'is_on_hold']
+        # `icon` = the circular profile picture, `cover_image` = the wide
+        # banner. Both accept ordinary image uploads (jpg/png/gif) — an
+        # animated .gif uploaded to either just plays as-is once rendered
+        # in an <img> tag on the frontend, no special "live gif" field
+        # needed. `is_verified` is admin-only (Django Admin / staff), never
+        # settable by a community creator through this serializer.
+        read_only_fields = ['id', 'created_at', 'is_on_hold', 'is_verified']
 
     def validate(self, attrs):
         # Auto-derive the slug from the name when the caller didn't supply
