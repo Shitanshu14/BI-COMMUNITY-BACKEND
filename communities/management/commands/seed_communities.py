@@ -1,8 +1,10 @@
+from django.core.files.base import ContentFile
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils.text import slugify
 
 from communities.models import Community
+from ._default_images import build_cover_png, build_icon_png
 
 
 # The default communities every fresh install ships with — matches the
@@ -85,10 +87,14 @@ class Command(BaseCommand):
             "--reset-boost", action="store_true",
             help="Also overwrite member_count_boost/category/description on communities that already exist.",
         )
+        parser.add_argument(
+            "--reset-images", action="store_true",
+            help="Regenerate icon/cover_image even for communities that already have one.",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options):
-        created, updated = 0, 0
+        created, updated, imaged = 0, 0, 0
         for item in DEFAULT_COMMUNITIES:
             slug = slugify(item["name"])
             community, was_created = Community.objects.get_or_create(
@@ -113,7 +119,24 @@ class Command(BaseCommand):
                 community.save(update_fields=["description", "category", "is_verified", "member_count_boost"])
                 updated += 1
 
+            # Backfill the generated icon + cover for any default community
+            # that's missing one (freshly created ones always are), or force
+            # it for every default community when --reset-images is passed.
+            needs_icon = options["reset_images"] or not community.icon
+            needs_cover = options["reset_images"] or not community.cover_image
+            if needs_icon or needs_cover:
+                file_stub = slug
+                if needs_icon:
+                    icon_bytes = build_icon_png(item["color"], item["icon_key"])
+                    community.icon.save(f"{file_stub}.png", ContentFile(icon_bytes), save=False)
+                if needs_cover:
+                    cover_bytes = build_cover_png(item["color"], item["icon_key"])
+                    community.cover_image.save(f"{file_stub}_cover.png", ContentFile(cover_bytes), save=False)
+                community.save(update_fields=["icon", "cover_image"])
+                imaged += 1
+
         self.stdout.write(self.style.SUCCESS(
             f"Seed complete — {created} community(ies) created, {updated} updated, "
+            f"{imaged} given icon/cover images, "
             f"{len(DEFAULT_COMMUNITIES) - created - updated} already up to date."
         ))
